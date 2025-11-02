@@ -243,10 +243,20 @@ public class JobsMainMenu extends BaseMenu {
                 return null;
             }
 
-            Material material = fr.ax_dev.universejobs.utils.EnumUtils.parseMaterial(iconMaterial, null);
+            // Handle legacy format where material contains texture data after colon
+            // e.g., "PLAYER_HEAD:eyJ0ZXh0dXJlcy..."
+            String materialName = iconMaterial;
+            if (iconMaterial.contains(":")) {
+                materialName = iconMaterial.split(":", 2)[0];
+                if (plugin.getConfigManager().isDebugEnabled()) {
+                    plugin.getLogger().info("Extracted material name '" + materialName + "' from '" + iconMaterial + "' for job " + job.getId());
+                }
+            }
+
+            Material material = fr.ax_dev.universejobs.utils.EnumUtils.parseMaterial(materialName, null);
 
             if (material == null) {
-                plugin.getLogger().severe("Invalid material for job " + job.getId() + ": " + iconMaterial);
+                plugin.getLogger().severe("Invalid material for job " + job.getId() + ": " + materialName);
             }
             return material;
         } else {

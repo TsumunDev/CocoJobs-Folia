@@ -68,9 +68,20 @@ public class Job {
             this.customModelData = customModelStr.isEmpty() ? 0 :
                 Integer.parseInt(customModelStr.replaceAll("[^0-9]", "0"));
         } else {
-            this.iconMaterial = config.getString("icon", "STONE");
+            // Legacy format: icon: "MATERIAL" or "PLAYER_HEAD:texture_data"
+            String iconValue = config.getString("icon", "STONE");
+
+            // Check if the legacy format contains texture data
+            if (iconValue.contains(":")) {
+                String[] parts = iconValue.split(":", 2);
+                this.iconMaterial = parts[0];
+                this.iconTexture = parts.length > 1 ? parts[1] : null;
+            } else {
+                this.iconMaterial = iconValue;
+                this.iconTexture = null;
+            }
+
             this.customModelData = 0;
-            this.iconTexture = null;
         }
         
         this.enabled = config.getBoolean("enabled", true);
