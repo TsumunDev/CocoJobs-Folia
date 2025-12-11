@@ -69,6 +69,7 @@ public final class UniverseJobs extends JavaPlugin implements Listener {
     private UpdateChecker updateChecker;
     private fr.ax_dev.universejobs.job.InactivityDecayManager inactivityDecayManager;
     private ExploreEventListener exploreEventListener;
+    private JobActionListener jobActionListener;
     
     // ========== STORAGE SYSTEM ==========
     private DataStorage dataStorage;
@@ -178,8 +179,8 @@ public final class UniverseJobs extends JavaPlugin implements Listener {
         }
         
         // Register event listeners avec cache ultra-rapide
-        getServer().getPluginManager().registerEvents(
-            new JobActionListener(this, actionProcessor, protectionManager, mythicMobsHandler, configCache, playerCache), this);
+        this.jobActionListener = new JobActionListener(this, actionProcessor, protectionManager, mythicMobsHandler, configCache, playerCache);
+        getServer().getPluginManager().registerEvents(jobActionListener, this);
         getServer().getPluginManager().registerEvents(new EnchantEventListener(this, actionProcessor), this);
         getServer().getPluginManager().registerEvents(new BrewEventListener(this, actionProcessor), this);
         getServer().getPluginManager().registerEvents(new RepairEventListener(this, actionProcessor), this);
@@ -889,10 +890,49 @@ public final class UniverseJobs extends JavaPlugin implements Listener {
     
     /**
      * Set the plugin instance (thread-safe).
-     * 
+     *
      * @param newInstance The new instance
      */
     private static synchronized void setInstance(UniverseJobs newInstance) {
         instance = newInstance;
+    }
+
+    /**
+     * Refresh all plugin caches after reload.
+     * Call this method when reloading configuration or after plugins change.
+     */
+    public void refreshAllCaches() {
+        // Refresh configuration cache
+        if (configCache != null) {
+            configCache.reload();
+        }
+
+        // Refresh action processor plugin availability
+        if (actionProcessor != null) {
+            actionProcessor.refreshPluginAvailability();
+        }
+
+        // Refresh job action listener plugin availability cache
+        if (jobActionListener != null) {
+            jobActionListener.refreshPluginAvailability();
+        }
+
+        // Refresh player cache (preload online players)
+        if (playerCache != null) {
+            playerCache.preloadOnlinePlayers();
+        }
+
+        if (configManager != null && configManager.isDebugEnabled()) {
+            getLogger().info("All plugin caches refreshed");
+        }
+    }
+
+    /**
+     * Get the JobActionListener for cache refresh operations.
+     *
+     * @return The JobActionListener instance, or null if not registered
+     */
+    public JobActionListener getJobActionListener() {
+        return jobActionListener;
     }
 }

@@ -62,25 +62,17 @@ public class CacheManager {
     
     /**
      * Get player data from cache.
-     * 
+     *
      * @param playerId Player UUID
      * @return PlayerJobData if cached, null otherwise
      */
     public PlayerJobData get(UUID playerId) {
+        // Fast path: read lock only for cache lookup
         lock.readLock().lock();
         try {
             CacheEntry entry = cache.get(playerId);
             if (entry != null) {
                 hits.incrementAndGet();
-                // Update access order
-                lock.readLock().unlock();
-                lock.writeLock().lock();
-                try {
-                    accessOrder.put(playerId, entry.updateAccess());
-                    lock.readLock().lock();
-                } finally {
-                    lock.writeLock().unlock();
-                }
                 return entry.data;
             } else {
                 misses.incrementAndGet();
@@ -89,6 +81,40 @@ public class CacheManager {
         } finally {
             lock.readLock().unlock();
         }
+    }
+
+    /**
+     * Get player data from cache with access order update.
+     * Use this method when LRU ordering is important.
+     *
+     * @param playerId Player UUID
+     * @return PlayerJobData if cached, null otherwise
+     */
+    public PlayerJobData getWithAccessUpdate(UUID playerId) {
+        CacheEntry entry;
+
+        // First check with read lock
+        lock.readLock().lock();
+        try {
+            entry = cache.get(playerId);
+            if (entry == null) {
+                misses.incrementAndGet();
+                return null;
+            }
+            hits.incrementAndGet();
+        } finally {
+            lock.readLock().unlock();
+        }
+
+        // Update access order with write lock (separate operation)
+        lock.writeLock().lock();
+        try {
+            accessOrder.put(playerId, entry.updateAccess());
+        } finally {
+            lock.writeLock().unlock();
+        }
+
+        return entry.data;
     }
     
     /**

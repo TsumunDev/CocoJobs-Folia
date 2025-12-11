@@ -52,31 +52,41 @@ public class PlayerJobCache {
     
     /**
      * Précharge les données d'un joueur de manière asynchrone.
+     * Uses plugin's async scheduler for Folia compatibility.
      */
     public CompletableFuture<Void> preloadPlayer(UUID playerUuid) {
-        return CompletableFuture.runAsync(() -> {
+        CompletableFuture<Void> future = new CompletableFuture<>();
+
+        // Use async task for database operations
+        plugin.getServer().getAsyncScheduler().runNow(plugin, scheduledTask -> {
             try {
                 PlayerJobData data = plugin.getJobManager().getPlayerData(playerUuid);
-                
-                // Cache jobs
-                playerJobsCache.put(playerUuid, new HashSet<>(data.getJobs()));
-                
+
+                // Cache jobs - use concurrent set for thread safety
+                Set<String> jobs = ConcurrentHashMap.newKeySet();
+                jobs.addAll(data.getJobs());
+                playerJobsCache.put(playerUuid, jobs);
+
                 // Cache levels et XP
                 Map<String, Integer> levels = new ConcurrentHashMap<>();
                 Map<String, Double> xp = new ConcurrentHashMap<>();
-                
+
                 for (String jobId : data.getJobs()) {
                     levels.put(jobId, data.getLevel(jobId));
                     xp.put(jobId, data.getXp(jobId));
                 }
-                
+
                 playerLevelsCache.put(playerUuid, levels);
                 playerXpCache.put(playerUuid, xp);
-                
+
+                future.complete(null);
             } catch (Exception e) {
-                plugin.getLogger().warning("Failed to preload player data for " + playerUuid);
+                plugin.getLogger().warning("Failed to preload player data for " + playerUuid + ": " + e.getMessage());
+                future.completeExceptionally(e);
             }
         });
+
+        return future;
     }
     
     /**
@@ -88,8 +98,26 @@ public class PlayerJobCache {
             cacheHits.incrementAndGet();
             return jobs;
         }
-        
+
         cacheMisses.incrementAndGet();
+
+        // Try to load synchronously from JobManager's cache first
+        try {
+            PlayerJobData data = plugin.getJobManager().getPlayerData(playerUuid);
+            if (data != null && !data.getJobs().isEmpty()) {
+                // Cache and return immediately
+                Set<String> loadedJobs = ConcurrentHashMap.newKeySet();
+                loadedJobs.addAll(data.getJobs());
+                playerJobsCache.put(playerUuid, loadedJobs);
+                return loadedJobs;
+            }
+        } catch (Exception e) {
+            // Sync load failed, trigger async preload
+            if (plugin.getConfigManager() != null && plugin.getConfigManager().isDebugEnabled()) {
+                plugin.getLogger().warning("Failed to sync-load player jobs for " + playerUuid + ", using async preload");
+            }
+        }
+
         // Fallback async - ne bloque pas
         preloadPlayer(playerUuid);
         return Collections.emptySet();

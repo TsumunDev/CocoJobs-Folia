@@ -50,6 +50,9 @@ public class ActionProcessor {
     private static final Map<UUID, Integer> PERMISSION_MULTIPLIER_CACHE = new ConcurrentHashMap<>();
     private static final Map<UUID, Long> PERMISSION_CACHE_TIMESTAMPS = new ConcurrentHashMap<>();
     private static final long PERMISSION_CACHE_DURATION = 30000L;
+
+    // Cached plugin availability
+    private volatile boolean vaultAvailable;
     
     /**
      * Create a new ActionProcessor with ultra-fast caching.
@@ -78,6 +81,17 @@ public class ActionProcessor {
         this.batchManager = new BatchedRewardManager(plugin);
         this.mcmmoHandler = McMMOHandler.getInstance(plugin);
         this.equationEvaluator = new EquationEvaluator(plugin);
+
+        // Cache plugin availability at startup
+        this.vaultAvailable = plugin.getServer().getPluginManager().isPluginEnabled("Vault");
+    }
+
+    /**
+     * Refresh cached plugin availability.
+     * Call this after server reload or when plugins change.
+     */
+    public void refreshPluginAvailability() {
+        this.vaultAvailable = plugin.getServer().getPluginManager().isPluginEnabled("Vault");
     }
     
     /**
@@ -492,20 +506,24 @@ public class ActionProcessor {
             }
         }
         
+        // Calculate final values once to avoid duplicate calculations
+        double finalXp = 0;
+        double finalMoney = 0;
+
         // XP processing (allow negative values for removal)
         if (xp != 0) {
             // Apply any XP multipliers
-            double finalXp = applyMultipliers(player, job, xp);
-            
+            finalXp = applyMultipliers(player, job, xp);
+
             // Apply bonus multipliers only if positive XP
             if (xp > 0) {
                 double bonusMultiplier = bonusManager.getTotalMultiplier(player.getUniqueId(), job.getId());
                 finalXp *= bonusMultiplier;
             }
-            
+
             // Add XP to batch for optimized processing
             batchManager.batchXp(player, job.getId(), finalXp);
-            
+
             // Check for level up only if positive XP
             if (xp > 0) {
                 int currentLevel = jobManager.getLevel(player, job.getId());
@@ -515,25 +533,23 @@ public class ActionProcessor {
                 }
             }
         }
-        
+
         // Money processing (allow negative values for removal)
         if (money != 0) {
             // Apply bonus multipliers only if positive money
-            double finalMoney = money;
+            finalMoney = money;
             if (money > 0) {
                 double moneyBonusMultiplier = moneyBonusManager.getTotalMultiplier(player.getUniqueId(), job.getId());
                 finalMoney = money * moneyBonusMultiplier;
             }
-            
+
             // Add/remove money to/from the player
             addPlayerMoney(player, finalMoney);
         }
-        
-        // Message async seulement si activé (et si pas supprimé) - use final values
+
+        // Message async seulement si activé (et si pas supprimé) - use pre-calculated final values
         boolean suppressMessage = "true".equals(context.get("suppress_message"));
-        double finalXp = xp != 0 ? (xp > 0 ? applyMultipliers(player, job, xp) * bonusManager.getTotalMultiplier(player.getUniqueId(), job.getId()) : applyMultipliers(player, job, xp)) : 0;
-        double finalMoney = money != 0 ? (money > 0 ? money * moneyBonusManager.getTotalMultiplier(player.getUniqueId(), job.getId()) : money) : 0;
-        
+
         if (configCache.isShowXpGain() && (finalXp != 0 || finalMoney != 0) && !suppressMessage) {
             fr.ax_dev.universejobs.job.PlayerJobData playerData = jobManager.getPlayerData(player);
             messageSender.sendXpMessage(player, job, finalXp, finalMoney, playerData);
@@ -826,16 +842,16 @@ public class ActionProcessor {
     /**
      * Add money to a player's balance.
      * This method handles integration with economy plugins like Vault.
-     * 
+     * Uses cached Vault availability for better performance.
+     *
      * @param player The player
      * @param amount The amount to add
      */
     private void addPlayerMoney(Player player, double amount) {
-        // Check if Vault is available and try to use it
-        if (plugin.getServer().getPluginManager().isPluginEnabled("Vault")) {
+        // Fast path: use cached Vault availability check
+        if (vaultAvailable) {
             try {
-                // Try to get Vault integration
-                // Add money to batch for optimized processing
+                // Add money to batch for optimized processing via Vault
                 batchManager.batchMoney(player, amount);
                 return;
             } catch (Exception e) {
@@ -843,12 +859,12 @@ public class ActionProcessor {
                 plugin.getLogger().warning("Failed to use Vault for money reward: " + e.getMessage());
             }
         }
-        
+
         // Fallback: Use commands to give money (works with most economy plugins)
         String command = "eco give {player} {amount}"
                 .replace("{player}", player.getName())
                 .replace("{amount}", String.valueOf(amount));
-        
+
         plugin.getServer().dispatchCommand(plugin.getServer().getConsoleSender(), command);
     }
     

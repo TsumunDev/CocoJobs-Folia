@@ -39,20 +39,41 @@ public class HikariConnectionPool {
             hikariConfig.setDriverClassName("org.sqlite.JDBC");
         }
 
-        hikariConfig.setMinimumIdle(config.getMinConnections());
-        hikariConfig.setMaximumPoolSize(config.getMaxConnections());
         hikariConfig.setConnectionTimeout(config.getConnectionTimeoutMs());
         hikariConfig.setValidationTimeout(TimeUnit.SECONDS.toMillis(5));
         hikariConfig.setLeakDetectionThreshold(TimeUnit.MINUTES.toMillis(1));
-        
-        hikariConfig.addDataSourceProperty("cachePrepStmts", "true");
-        hikariConfig.addDataSourceProperty("prepStmtCacheSize", "250");
-        hikariConfig.addDataSourceProperty("prepStmtCacheSqlLimit", "2048");
-        
+
         if (config.getType() == DatabaseType.MYSQL) {
+            // MySQL-specific optimizations
+            hikariConfig.setMinimumIdle(config.getMinConnections());
+            hikariConfig.setMaximumPoolSize(config.getMaxConnections());
+
+            hikariConfig.addDataSourceProperty("cachePrepStmts", "true");
+            hikariConfig.addDataSourceProperty("prepStmtCacheSize", "250");
+            hikariConfig.addDataSourceProperty("prepStmtCacheSqlLimit", "2048");
             hikariConfig.addDataSourceProperty("useServerPrepStmts", "true");
             hikariConfig.addDataSourceProperty("rewriteBatchedStatements", "true");
             hikariConfig.addDataSourceProperty("maintainTimeStats", "false");
+            hikariConfig.addDataSourceProperty("useLocalSessionState", "true");
+            hikariConfig.addDataSourceProperty("cacheResultSetMetadata", "true");
+            hikariConfig.addDataSourceProperty("cacheServerConfiguration", "true");
+            hikariConfig.addDataSourceProperty("elideSetAutoCommits", "true");
+        } else {
+            // SQLite-specific optimizations
+            // SQLite works best with a single connection due to file locking
+            hikariConfig.setMinimumIdle(1);
+            hikariConfig.setMaximumPoolSize(1);
+            hikariConfig.setIdleTimeout(0); // Never timeout for single connection
+            hikariConfig.setMaxLifetime(0); // Never expire the connection
+
+            // SQLite performance pragmas via connection init
+            hikariConfig.setConnectionInitSql(
+                "PRAGMA journal_mode=WAL; " +
+                "PRAGMA synchronous=NORMAL; " +
+                "PRAGMA cache_size=10000; " +
+                "PRAGMA temp_store=MEMORY; " +
+                "PRAGMA mmap_size=268435456;"
+            );
         }
 
         try {

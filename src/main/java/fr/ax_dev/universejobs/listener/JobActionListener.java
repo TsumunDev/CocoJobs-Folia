@@ -51,30 +51,45 @@ import java.util.concurrent.atomic.AtomicLong;
 
 /**
  * Listens for job-related actions and processes them.
+ * Optimized with cached plugin availability checks.
  */
 public class JobActionListener implements Listener {
-    
+
     private static final String TARGET_SUFFIX = " - target: ";
     private static final String COLOR_CODE_PATTERN = "§[0-9a-fk-or]";
     private static final String TARGET_KEY = "target";
-    
+
     private final UniverseJobs plugin;
     private final ActionProcessor actionProcessor;
     private final BlockProtectionManager protectionManager;
     private final MythicMobsHandler mythicMobsHandler;
     private final ConfigurationCache configCache;
     private final PlayerJobCache playerCache;
-    
+
     // Statistiques ultra-légères
     private final AtomicLong totalEvents = new AtomicLong(0);
     private final AtomicLong processedEvents = new AtomicLong(0);
-    
+
     // NBT keys for furnace owner tracking
     private final NamespacedKey furnaceOwnerKey;
     private final NamespacedKey furnaceLastUseKey;
+
+    // Cached plugin availability - checked once at startup and on reload
+    private volatile boolean nexoAvailable;
+    private volatile boolean itemsAdderAvailable;
+    private volatile boolean oraxenAvailable;
+    private volatile boolean customFishingAvailable;
+    private volatile boolean customCropsAvailable;
+    private volatile boolean mmoItemsAvailable;
+    private volatile boolean placeholderApiAvailable;
+
+    // Cached reflection methods for plugin integrations (avoid repeated lookups)
+    private volatile java.lang.reflect.Method itemsAdderByPlacedMethod;
+    private volatile java.lang.reflect.Method oraxenIsBlockMethod;
+
     /**
      * Create a new ultra-fast JobActionListener with caching.
-     * 
+     *
      * @param plugin The plugin instance
      * @param actionProcessor The action processor
      * @param protectionManager The block protection manager
@@ -82,7 +97,7 @@ public class JobActionListener implements Listener {
      * @param configCache The configuration cache
      * @param playerCache The player cache
      */
-    public JobActionListener(UniverseJobs plugin, ActionProcessor actionProcessor, BlockProtectionManager protectionManager, 
+    public JobActionListener(UniverseJobs plugin, ActionProcessor actionProcessor, BlockProtectionManager protectionManager,
                            MythicMobsHandler mythicMobsHandler, ConfigurationCache configCache, PlayerJobCache playerCache) {
         this.plugin = plugin;
         this.actionProcessor = actionProcessor;
@@ -90,9 +105,55 @@ public class JobActionListener implements Listener {
         this.mythicMobsHandler = mythicMobsHandler;
         this.configCache = configCache;
         this.playerCache = playerCache;
-        
+
         this.furnaceOwnerKey = new NamespacedKey(plugin, "furnace_owner");
         this.furnaceLastUseKey = new NamespacedKey(plugin, "furnace_last_use");
+
+        // Cache plugin availability at startup
+        refreshPluginAvailability();
+    }
+
+    /**
+     * Refresh cached plugin availability.
+     * Call this after server reload or when plugins change.
+     */
+    public void refreshPluginAvailability() {
+        this.nexoAvailable = plugin.getServer().getPluginManager().isPluginEnabled("Nexo");
+        this.itemsAdderAvailable = plugin.getServer().getPluginManager().isPluginEnabled("ItemsAdder");
+        this.oraxenAvailable = plugin.getServer().getPluginManager().isPluginEnabled("Oraxen");
+        this.customFishingAvailable = plugin.getServer().getPluginManager().isPluginEnabled("CustomFishing");
+        this.customCropsAvailable = plugin.getServer().getPluginManager().isPluginEnabled("CustomCrops");
+        this.mmoItemsAvailable = plugin.getServer().getPluginManager().isPluginEnabled("MMOItems");
+        this.placeholderApiAvailable = plugin.getServer().getPluginManager().isPluginEnabled("PlaceholderAPI");
+
+        // Cache reflection methods for ItemsAdder
+        if (itemsAdderAvailable) {
+            try {
+                Class<?> customBlockClass = Class.forName("dev.lone.itemsadder.api.CustomBlock");
+                this.itemsAdderByPlacedMethod = customBlockClass.getMethod("byAlreadyPlaced", org.bukkit.block.Block.class);
+            } catch (Exception e) {
+                this.itemsAdderByPlacedMethod = null;
+            }
+        } else {
+            this.itemsAdderByPlacedMethod = null;
+        }
+
+        // Cache reflection methods for Oraxen
+        if (oraxenAvailable) {
+            try {
+                Class<?> oraxenBlocksClass = Class.forName("io.th0rgal.oraxen.api.OraxenBlocks");
+                this.oraxenIsBlockMethod = oraxenBlocksClass.getMethod("isOraxenBlock", org.bukkit.block.Block.class);
+            } catch (Exception e) {
+                this.oraxenIsBlockMethod = null;
+            }
+        } else {
+            this.oraxenIsBlockMethod = null;
+        }
+
+        if (configCache.isDebugEnabled()) {
+            plugin.getLogger().info("Plugin availability cached - Nexo: " + nexoAvailable +
+                ", ItemsAdder: " + itemsAdderAvailable + ", Oraxen: " + oraxenAvailable);
+        }
     }
     
     
@@ -1117,47 +1178,58 @@ public class JobActionListener implements Listener {
     
     /**
      * Detect Nexo items by checking for Nexo-specific metadata.
+     * Uses cached plugin availability for better performance.
      */
     private String detectNexoItem(ItemStack item) {
+        // Fast path: use cached availability check
+        if (!nexoAvailable) {
+            return null;
+        }
+
         try {
-            // Try to use Nexo API if available
-            if (plugin.getServer().getPluginManager().isPluginEnabled("Nexo") && item.hasItemMeta() && item.getItemMeta().hasCustomModelData()) {
+            if (item.hasItemMeta() && item.getItemMeta().hasCustomModelData()) {
                 // Nexo items typically have specific NBT tags or custom model data
-                // This is a basic detection - in a real implementation,
-                // you'd use the Nexo API to properly identify items
                 return "nexo:item_" + item.getItemMeta().getCustomModelData();
             }
         } catch (Exception e) {
-            // Nexo not available or error occurred
+            // Error occurred
         }
         return null;
     }
     
     /**
      * Detect ItemsAdder items by checking for ItemsAdder-specific metadata.
+     * Uses cached plugin availability for better performance.
      */
     private String detectItemsAdderItem(ItemStack item) {
+        // Fast path: use cached availability check
+        if (!itemsAdderAvailable) {
+            return null;
+        }
+
         try {
-            // Try to use ItemsAdder API if available
-            if (plugin.getServer().getPluginManager().isPluginEnabled("ItemsAdder") && item.hasItemMeta() && item.getItemMeta().hasCustomModelData()) {
+            if (item.hasItemMeta() && item.getItemMeta().hasCustomModelData()) {
                 // ItemsAdder items typically have specific NBT tags
-                // This is a basic detection - in a real implementation,
-                // you'd use the ItemsAdder API to properly identify items
                 return "itemsadder:item_" + item.getItemMeta().getCustomModelData();
             }
         } catch (Exception e) {
-            // ItemsAdder not available or error occurred
+            // Error occurred
         }
         return null;
     }
     
     /**
      * Detect CustomFishing items by checking for CustomFishing-specific metadata.
+     * Uses cached plugin availability for better performance.
      */
     private String detectCustomFishingItem(ItemStack item) {
+        // Fast path: use cached availability check
+        if (!customFishingAvailable) {
+            return null;
+        }
+
         try {
-            // Try to use CustomFishing API if available
-            if (plugin.getServer().getPluginManager().isPluginEnabled("CustomFishing") && item.hasItemMeta()) {
+            if (item.hasItemMeta()) {
                 // Check for fish-like items or CustomFishing NBT
                 String displayName = item.getItemMeta().getDisplayName();
                 if (displayName != null && !displayName.isEmpty()) {
@@ -1168,18 +1240,23 @@ public class JobActionListener implements Listener {
                 }
             }
         } catch (Exception e) {
-            // CustomFishing not available or error occurred
+            // Error occurred
         }
         return null;
     }
     
     /**
      * Detect CustomCrops items by checking for CustomCrops-specific metadata.
+     * Uses cached plugin availability for better performance.
      */
     private String detectCustomCropsItem(ItemStack item) {
+        // Fast path: use cached availability check
+        if (!customCropsAvailable) {
+            return null;
+        }
+
         try {
-            // Try to use CustomCrops API if available
-            if (plugin.getServer().getPluginManager().isPluginEnabled("CustomCrops") && item.hasItemMeta()) {
+            if (item.hasItemMeta()) {
                 // Check for crop-like items or CustomCrops NBT
                 String displayName = item.getItemMeta().getDisplayName();
                 if (displayName != null && !displayName.isEmpty()) {
@@ -1190,7 +1267,7 @@ public class JobActionListener implements Listener {
                 }
             }
         } catch (Exception e) {
-            // CustomCrops not available or error occurred
+            // Error occurred
         }
         return null;
     }
@@ -1298,65 +1375,61 @@ public class JobActionListener implements Listener {
     
     /**
      * Detect MMOItems NBT format (MMOITEMS:TYPE:ID).
+     * Uses cached plugin availability for better performance.
      */
     private String detectMMOItemsNBT(ItemStack item) {
+        // Fast path: use cached availability check
+        if (!mmoItemsAvailable) {
+            return null;
+        }
+
         try {
-            if (plugin.getServer().getPluginManager().isPluginEnabled("MMOItems")) {
-                // Try to detect MMOItems using display name and lore patterns
-                if (item.hasItemMeta() && item.getItemMeta().hasDisplayName()) {
-                    // Basic detection - in a real implementation, you'd use MMOItems API
-                    String displayName = item.getItemMeta().getDisplayName();
-                    if (displayName.contains("§") && item.getItemMeta().hasLore()) {
-                        // This is a simplified detection - MMOItems usually have specific NBT
-                        // You would need MMOItems API for proper detection
-                        return "MMOITEMS:CONSUMABLE:" + displayName.replaceAll(COLOR_CODE_PATTERN, "").replaceAll("[^A-Z0-9]", "_").toUpperCase();
-                    }
+            // Try to detect MMOItems using display name and lore patterns
+            if (item.hasItemMeta() && item.getItemMeta().hasDisplayName()) {
+                // Basic detection - in a real implementation, you'd use MMOItems API
+                String displayName = item.getItemMeta().getDisplayName();
+                if (displayName.contains("§") && item.getItemMeta().hasLore()) {
+                    // This is a simplified detection - MMOItems usually have specific NBT
+                    return "MMOITEMS:CONSUMABLE:" + displayName.replaceAll(COLOR_CODE_PATTERN, "").replaceAll("[^A-Z0-9]", "_").toUpperCase();
                 }
             }
         } catch (Exception e) {
-            // MMOItems not available or error occurred
+            // Error occurred
         }
         return null;
     }
     
     /**
      * Add plugin-specific context for CustomCrops, CustomFishing, Nexo, and ItemsAdder.
+     * Uses cached plugin availability for better performance.
      */
     private void addPluginSpecificContext(ItemStack item, ConditionContext context) {
-        // Check for CustomCrops items
-        if (plugin.getServer().getPluginManager().isPluginEnabled("CustomCrops")) {
-            String customCropsId = detectCustomCropsItem(item);
-            if (customCropsId != null) {
-                context.set("customcrops_id", customCropsId);
-                context.set("nbt", customCropsId);
-            }
+        // Check for CustomCrops items (uses cached check internally)
+        String customCropsId = detectCustomCropsItem(item);
+        if (customCropsId != null) {
+            context.set("customcrops_id", customCropsId);
+            context.set("nbt", customCropsId);
         }
-        
-        // Check for CustomFishing items
-        if (plugin.getServer().getPluginManager().isPluginEnabled("CustomFishing")) {
-            String customFishingId = detectCustomFishingItem(item);
-            if (customFishingId != null) {
-                context.set("customfishing_id", customFishingId);
-                context.set("nbt", customFishingId);
-            }
+
+        // Check for CustomFishing items (uses cached check internally)
+        String customFishingId = detectCustomFishingItem(item);
+        if (customFishingId != null) {
+            context.set("customfishing_id", customFishingId);
+            context.set("nbt", customFishingId);
         }
-        
-        // Check for Nexo items
-        if (plugin.getServer().getPluginManager().isPluginEnabled("Nexo")) {
-            String nexoId = detectNexoItem(item);
-            if (nexoId != null) {
-                context.set("nexo_id", nexoId);
-                context.set("nbt", nexoId);
-            }
+
+        // Check for Nexo items (uses cached check internally)
+        String nexoId = detectNexoItem(item);
+        if (nexoId != null) {
+            context.set("nexo_id", nexoId);
+            context.set("nbt", nexoId);
         }
-        
-        // Check for ItemsAdder items
-        if (plugin.getServer().getPluginManager().isPluginEnabled("ItemsAdder")) {
-            String itemsAdderId = detectItemsAdderItem(item);
-            if (itemsAdderId != null) {
-                context.set("itemsadder_id", itemsAdderId);
-                context.set("nbt", itemsAdderId);
-            }
+
+        // Check for ItemsAdder items (uses cached check internally)
+        String itemsAdderId = detectItemsAdderItem(item);
+        if (itemsAdderId != null) {
+            context.set("itemsadder_id", itemsAdderId);
+            context.set("nbt", itemsAdderId);
         }
     }
     
@@ -1420,16 +1493,16 @@ public class JobActionListener implements Listener {
     /**
      * Check if a block is a Nexo custom block.
      * This prevents duplicate processing between vanilla and Nexo events.
+     * Uses cached plugin availability for better performance.
      */
     private boolean isNexoBlock(org.bukkit.block.Block block) {
+        // Fast path: use cached availability check
+        if (!nexoAvailable) {
+            return false;
+        }
+
         try {
-            // Check if Nexo is installed
-            if (!plugin.getServer().getPluginManager().isPluginEnabled("Nexo")) {
-                return false;
-            }
-            
             // Use Nexo API to check if this is a custom block
-            // Using the current Nexo API structure
             return com.nexomc.nexo.api.NexoBlocks.isCustomBlock(block);
         } catch (Exception e) {
             // If any error occurs, assume it's not a Nexo block
@@ -1498,19 +1571,17 @@ public class JobActionListener implements Listener {
     /**
      * Check if a block is an ItemsAdder custom block.
      * This prevents duplicate processing between vanilla and ItemsAdder events.
+     * Uses cached plugin availability and reflection methods for better performance.
      */
     private boolean isItemsAdderBlock(org.bukkit.block.Block block) {
+        // Fast path: use cached availability and method check
+        if (!itemsAdderAvailable || itemsAdderByPlacedMethod == null) {
+            return false;
+        }
+
         try {
-            // Check if ItemsAdder is installed
-            if (!plugin.getServer().getPluginManager().isPluginEnabled("ItemsAdder")) {
-                return false;
-            }
-            
-            // Use reflection to avoid NoClassDefFoundError when ItemsAdder is not present
-            Class<?> customBlockClass = Class.forName("dev.lone.itemsadder.api.CustomBlock");
-            java.lang.reflect.Method byAlreadyPlacedMethod = customBlockClass.getMethod("byAlreadyPlaced", org.bukkit.block.Block.class);
-            Object customBlock = byAlreadyPlacedMethod.invoke(null, block);
-            
+            // Use cached reflection method
+            Object customBlock = itemsAdderByPlacedMethod.invoke(null, block);
             return customBlock != null;
         } catch (Exception e) {
             // If any error occurs, assume it's not an ItemsAdder block
@@ -1521,29 +1592,17 @@ public class JobActionListener implements Listener {
     /**
      * Check if a block is an Oraxen custom block.
      * This prevents duplicate processing between vanilla and Oraxen events.
+     * Uses cached plugin availability and reflection methods for better performance.
      */
     private boolean isOraxenBlock(org.bukkit.block.Block block) {
-        try {
-            // Check if Oraxen is installed
-            if (!plugin.getServer().getPluginManager().isPluginEnabled("Oraxen")) {
-                return false;
-            }
-            
-            // Use reflection to avoid NoClassDefFoundError when Oraxen is not present
-            Class<?> oraxenListenerClass = Class.forName("fr.ax_dev.universejobs.listener.OraxenEventListener");
-            java.lang.reflect.Method isOraxenBlockMethod = oraxenListenerClass.getMethod("isOraxenBlock", org.bukkit.block.Block.class);
-            
-            // Get the OraxenEventListener instance from the server
-            // This is a simplified approach - in reality, you might want to store a reference
-            for (org.bukkit.event.HandlerList handler : org.bukkit.event.HandlerList.getHandlerLists()) {
-                for (org.bukkit.plugin.RegisteredListener listener : handler.getRegisteredListeners()) {
-                    if (listener.getListener().getClass().equals(oraxenListenerClass)) {
-                        return (Boolean) isOraxenBlockMethod.invoke(listener.getListener(), block);
-                    }
-                }
-            }
-            
+        // Fast path: use cached availability and method check
+        if (!oraxenAvailable || oraxenIsBlockMethod == null) {
             return false;
+        }
+
+        try {
+            // Use cached reflection method
+            return (Boolean) oraxenIsBlockMethod.invoke(null, block);
         } catch (Exception e) {
             return false;
         }

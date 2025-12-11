@@ -7,7 +7,11 @@ import fr.ax_dev.universejobs.action.ActionType;
 import org.bukkit.Material;
 import org.bukkit.entity.EntityType;
 
-import java.util.*;
+import java.util.Collections;
+import java.util.HashSet;
+import java.util.List;
+import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.regex.Pattern;
 
@@ -339,20 +343,40 @@ public class ConfigurationCache {
         return result;
     }
     
+    // Cached material and entity names - computed once
+    private static volatile Set<String> cachedMaterialNames;
+    private static volatile Set<String> cachedEntityNames;
+    private static final Object MATERIAL_CACHE_LOCK = new Object();
+    private static final Object ENTITY_CACHE_LOCK = new Object();
+
     private Set<String> getAllMaterials() {
-        Set<String> materials = new HashSet<>();
-        for (Material mat : Material.values()) {
-            materials.add(mat.name());
+        if (cachedMaterialNames == null) {
+            synchronized (MATERIAL_CACHE_LOCK) {
+                if (cachedMaterialNames == null) {
+                    Set<String> materials = new HashSet<>();
+                    for (Material mat : Material.values()) {
+                        materials.add(mat.name());
+                    }
+                    cachedMaterialNames = Collections.unmodifiableSet(materials);
+                }
+            }
         }
-        return materials;
+        return cachedMaterialNames;
     }
-    
+
     private Set<String> getAllEntities() {
-        Set<String> entities = new HashSet<>();
-        for (EntityType entity : EntityType.values()) {
-            entities.add(entity.name());
+        if (cachedEntityNames == null) {
+            synchronized (ENTITY_CACHE_LOCK) {
+                if (cachedEntityNames == null) {
+                    Set<String> entities = new HashSet<>();
+                    for (EntityType entity : EntityType.values()) {
+                        entities.add(entity.name());
+                    }
+                    cachedEntityNames = Collections.unmodifiableSet(entities);
+                }
+            }
         }
-        return entities;
+        return cachedEntityNames;
     }
     
     /**

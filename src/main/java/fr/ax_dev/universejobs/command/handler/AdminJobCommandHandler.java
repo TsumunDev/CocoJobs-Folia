@@ -977,9 +977,9 @@ public class AdminJobCommandHandler extends JobCommandHandler {
 
                 plugin.getRewardManager().reloadRewards();
 
-                plugin.getConfigCache().reload();
-                plugin.getPlayerCache().preloadOnlinePlayers();
-                
+                // Refresh all caches including plugin availability
+                plugin.refreshAllCaches();
+
                 plugin.getFoliaManager().runNextTick(() ->
                     sendMessage(sender, "reload-success"));
             } catch (Exception e) {
