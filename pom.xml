@@ -132,11 +132,7 @@
             <version>2.11.6</version>
             <scope>provided</scope>
         </dependency>
-        <dependency>
-            <groupId>de.tr7zw</groupId>
-            <artifactId>item-nbt-api</artifactId>
-            <version>2.13.2</version>
-        </dependency>
+        <!-- NBTAPI removed - using Paper native PDC API -->
         <dependency>
             <groupId>com.nexomc</groupId>
             <artifactId>nexo</artifactId>

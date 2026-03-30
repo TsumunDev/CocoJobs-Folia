@@ -112,25 +112,26 @@ public class JobsRebornMigrationHandler {
         sender.sendMessage("§aStarting JobsReborn player data migration...");
 
         plugin.getFoliaManager().runAsync(() -> {
-            try {
-                JobsRebornDataMigrator.MigrationResult result = migrator.migrateAllData().join();
-
-                plugin.getFoliaManager().runNextTick(() -> {
-                    if (result.isSuccessful()) {
-                        sender.sendMessage("§aData migration completed successfully!");
-                        sender.sendMessage("§aPlayer data migrated: " + result.playerDataMigrated);
-                        migrator.markMigrationComplete();
-                    } else {
-                        sender.sendMessage("§cData migration failed: " + result.error);
-                    }
+            // Use callback instead of .join() since we're already in async context
+            migrator.migrateAllData()
+                .thenAccept(result -> {
+                    plugin.getFoliaManager().runNextTick(() -> {
+                        if (result.isSuccessful()) {
+                            sender.sendMessage("§aData migration completed successfully!");
+                            sender.sendMessage("§aPlayer data migrated: " + result.playerDataMigrated);
+                            migrator.markMigrationComplete();
+                        } else {
+                            sender.sendMessage("§cData migration failed: " + result.error);
+                        }
+                    });
+                })
+                .exceptionally(ex -> {
+                    plugin.getFoliaManager().runNextTick(() -> {
+                        sender.sendMessage("§cData migration failed: " + ex.getMessage());
+                    });
+                    plugin.getLogger().log(Level.SEVERE, "Data migration failed", ex);
+                    return null;
                 });
-
-            } catch (Exception e) {
-                plugin.getFoliaManager().runNextTick(() -> {
-                    sender.sendMessage("§cData migration failed: " + e.getMessage());
-                });
-                plugin.getLogger().log(Level.SEVERE, "Data migration failed", e);
-            }
         });
 
         return true;
@@ -140,27 +141,26 @@ public class JobsRebornMigrationHandler {
         sender.sendMessage("§aStarting full JobsReborn migration (jobs + data)...");
 
         plugin.getFoliaManager().runAsync(() -> {
-            try {
-                JobsRebornConverter converter = new JobsRebornConverter(plugin);
-                JobsRebornConverter.ConversionResult jobsResult = converter.convertJobs(null); // null = all jobs
+            JobsRebornConverter converter = new JobsRebornConverter(plugin);
+            JobsRebornConverter.ConversionResult jobsResult = converter.convertJobs(null); // null = all jobs
 
-                CompletableFuture<JobsRebornDataMigrator.MigrationResult> dataFuture;
+            // Prepare data migration future
+            CompletableFuture<JobsRebornDataMigrator.MigrationResult> dataFuture;
+            if (plugin.isDatabaseEnabled()) {
+                DatabaseDataStorage storage = (DatabaseDataStorage) plugin.getDataStorage();
+                JobsRebornDataMigrator migrator = new JobsRebornDataMigrator(plugin, storage);
 
-                if (plugin.isDatabaseEnabled()) {
-                    DatabaseDataStorage storage = (DatabaseDataStorage) plugin.getDataStorage();
-                    JobsRebornDataMigrator migrator = new JobsRebornDataMigrator(plugin, storage);
-
-                    if (migrator.shouldMigrate()) {
-                        dataFuture = migrator.migrateAllData();
-                    } else {
-                        dataFuture = CompletableFuture.completedFuture(null);
-                    }
+                if (migrator.shouldMigrate()) {
+                    dataFuture = migrator.migrateAllData();
                 } else {
                     dataFuture = CompletableFuture.completedFuture(null);
                 }
+            } else {
+                dataFuture = CompletableFuture.completedFuture(null);
+            }
 
-                JobsRebornDataMigrator.MigrationResult dataResult = dataFuture.join();
-
+            // Use callback instead of .join() since we're already in async context
+            dataFuture.thenAccept(dataResult -> {
                 plugin.getFoliaManager().runNextTick(() -> {
                     sender.sendMessage("§a=== JobsReborn Migration Results ===");
 
@@ -200,15 +200,15 @@ public class JobsRebornMigrationHandler {
                         }
                     }
 
-                    sender.sendMessage("§eRestart the server to load the new configurations.");
+                    sender.sendMessage("§eRestart the server to load new configurations.");
                 });
-
-            } catch (Exception e) {
+            }).exceptionally(ex -> {
                 plugin.getFoliaManager().runNextTick(() -> {
-                    sender.sendMessage("§cFull migration failed: " + e.getMessage());
+                    sender.sendMessage("§cFull migration failed: " + ex.getMessage());
                 });
-                plugin.getLogger().log(Level.SEVERE, "Full migration failed", e);
-            }
+                plugin.getLogger().log(Level.SEVERE, "Full migration failed", ex);
+                return null;
+            });
         });
 
         return true;

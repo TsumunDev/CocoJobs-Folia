@@ -47,9 +47,8 @@ public class ActionProcessor {
     private final McMMOHandler mcmmoHandler;
     private final EquationEvaluator equationEvaluator;
 
-    private static final Map<UUID, Integer> PERMISSION_MULTIPLIER_CACHE = new ConcurrentHashMap<>();
-    private static final Map<UUID, Long> PERMISSION_CACHE_TIMESTAMPS = new ConcurrentHashMap<>();
-    private static final long PERMISSION_CACHE_DURATION = 30000L;
+    // Permission multiplier cache moved to UnifiedCacheManager
+    // Removed: PERMISSION_MULTIPLIER_CACHE, PERMISSION_CACHE_TIMESTAMPS, PERMISSION_CACHE_DURATION
 
     // Cached plugin availability
     private volatile boolean vaultAvailable;
@@ -827,8 +826,8 @@ public class ActionProcessor {
     private double applyMultipliers(Player player, Job job, double baseXp) {
         double multiplier = 1.0;
         
-        // Check for permission-based multipliers (cached for performance)
-        multiplier = getCachedPermissionMultiplier(player);
+        // Check for permission-based multipliers (now cached in UnifiedCacheManager)
+        multiplier = plugin.getUnifiedCache().getMultiplier(player.getUniqueId());
         
         // Could add other multipliers here:
         // - Time-based bonuses
@@ -918,47 +917,6 @@ public class ActionProcessor {
     }
     
     /**
-     * Get cached permission multiplier for player (optimized for performance).
-     * 
-     * @param player The player to check
-     * @return The permission multiplier (1.0 = no multiplier)
-     */
-    private double getCachedPermissionMultiplier(Player player) {
-        UUID playerId = player.getUniqueId();
-        long currentTime = System.currentTimeMillis();
-        
-        // Check if we have a cached result that's still valid
-        Long cacheTime = PERMISSION_CACHE_TIMESTAMPS.get(playerId);
-        if (cacheTime != null && (currentTime - cacheTime) < PERMISSION_CACHE_DURATION) {
-            Integer cachedMultiplier = PERMISSION_MULTIPLIER_CACHE.get(playerId);
-            if (cachedMultiplier != null) {
-                return cachedMultiplier;
-            }
-        }
-        
-        // Calculate multiplier (expensive operation)
-        double multiplier = 1.0;
-        
-        // Skip if player is OP or has wildcard permission to avoid overpowered bonuses
-        if (!player.isOp() && !player.hasPermission("*")) {
-            for (int i = 10; i >= 1; i--) {
-                String permission = "universejobs.multiplier.exp." + i;
-                // Check if player has the specific permission (not through wildcard)
-                if (player.hasPermission(permission) && !hasWildcardPermission(player)) {
-                    multiplier = i;
-                    break;
-                }
-            }
-        }
-        
-        // Cache the result
-        PERMISSION_MULTIPLIER_CACHE.put(playerId, (int) multiplier);
-        PERMISSION_CACHE_TIMESTAMPS.put(playerId, currentTime);
-        
-        return multiplier;
-    }
-    
-    /**
      * Check if player has wildcard permissions.
      * 
      * @param player The player to check
@@ -971,26 +929,6 @@ public class ActionProcessor {
                player.hasPermission("universejobs.multiplier.*") ||
                player.hasPermission("universejobs.multiplier.money.*") ||
                player.hasPermission("universejobs.multiplier.exp.*");
-    }
-    
-    /**
-     * Clear permission cache for a player (call on disconnect).
-     * 
-     * @param playerId The player UUID
-     */
-    public static void clearPermissionCache(UUID playerId) {
-        PERMISSION_MULTIPLIER_CACHE.remove(playerId);
-        PERMISSION_CACHE_TIMESTAMPS.remove(playerId);
-    }
-    
-    /**
-     * Clear all expired permission cache entries (call periodically).
-     */
-    public static void cleanupExpiredPermissionCache() {
-        long currentTime = System.currentTimeMillis();
-        PERMISSION_CACHE_TIMESTAMPS.entrySet().removeIf(entry -> 
-            (currentTime - entry.getValue()) >= PERMISSION_CACHE_DURATION);
-        PERMISSION_MULTIPLIER_CACHE.keySet().retainAll(PERMISSION_CACHE_TIMESTAMPS.keySet());
     }
     
     /**
@@ -1073,14 +1011,14 @@ public class ActionProcessor {
     public void clearExpiredCaches() {
         equationEvaluator.clearExpiredPapiCache();
 
-        long currentTime = System.currentTimeMillis();
-        PERMISSION_CACHE_TIMESTAMPS.entrySet().removeIf(entry ->
-            (currentTime - entry.getValue()) > PERMISSION_CACHE_DURATION);
+        // Delegate to UnifiedCacheManager
+        plugin.getUnifiedCache().performCleanup();
     }
 
     public void clearPlayerCache(UUID playerId) {
         equationEvaluator.clearCache(playerId);
-        PERMISSION_MULTIPLIER_CACHE.remove(playerId);
-        PERMISSION_CACHE_TIMESTAMPS.remove(playerId);
+
+        // Delegate to UnifiedCacheManager
+        plugin.getUnifiedCache().invalidateMultiplier(playerId);
     }
 }

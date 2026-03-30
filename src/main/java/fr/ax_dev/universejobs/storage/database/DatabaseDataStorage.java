@@ -25,13 +25,12 @@ public class DatabaseDataStorage implements DataStorage {
     private final JobStatsDao jobStatsDao;
     private final LeaderboardDao leaderboardDao;
     
-    private final Map<UUID, PlayerJobData> cache = new ConcurrentHashMap<>();
+    // Cache removed - now handled by UnifiedCacheManager
+    // Only rewardCache remains as it's for reward tracking, not player data
     private final Map<UUID, Set<String>> rewardCache = new ConcurrentHashMap<>();
     private final AtomicBoolean initialized = new AtomicBoolean(false);
     private final AtomicBoolean shutdown = new AtomicBoolean(false);
     
-    private long cacheHits = 0;
-    private long cacheMisses = 0;
     private long totalOperations = 0;
 
     public DatabaseDataStorage(UniverseJobs plugin) {
@@ -67,7 +66,7 @@ public class DatabaseDataStorage implements DataStorage {
         return CompletableFuture.runAsync(() -> {
             if (shutdown.compareAndSet(false, true)) {
                 try {
-                    cache.clear();
+                    // Cache handled by UnifiedCacheManager
                     rewardCache.clear();
                     connectionPool.shutdown();
                 } catch (Exception e) {
@@ -84,8 +83,7 @@ public class DatabaseDataStorage implements DataStorage {
         }
 
         totalOperations++;
-        cache.put(playerId, data);
-
+        // Cache handled by UnifiedCacheManager, update it after save
         CompletableFuture<Void> saveFuture = playerDataDao.savePlayerData(playerId, data);
 
         saveFuture.thenRun(() -> {
@@ -97,6 +95,9 @@ public class DatabaseDataStorage implements DataStorage {
                 int level = data.getLevel(jobId);
                 leaderboardDao.updatePlayerLeaderboardEntry(playerId, playerName, jobId, xp, level);
             }
+            
+            // Update UnifiedCacheManager
+            plugin.getUnifiedCache().updatePlayerData(playerId, data);
         });
         
         return saveFuture;
@@ -109,16 +110,9 @@ public class DatabaseDataStorage implements DataStorage {
         }
         
         totalOperations++;
-        
-        PlayerJobData cachedData = cache.get(playerId);
-        if (cachedData != null) {
-            cacheHits++;
-            return CompletableFuture.completedFuture(cachedData);
-        }
-        
-        cacheMisses++;
+        // Cache handled by UnifiedCacheManager, load directly from DB
         return playerDataDao.loadPlayerData(playerId).thenApply(data -> {
-            cache.put(playerId, data);
+            // Cache update handled by UnifiedCacheManager via its async loader
             return data;
         });
     }
@@ -142,28 +136,10 @@ public class DatabaseDataStorage implements DataStorage {
             return CompletableFuture.failedFuture(new IllegalStateException("Storage is shutdown"));
         }
         
-        Map<UUID, PlayerJobData> result = new HashMap<>();
-        Set<UUID> toLoad = new HashSet<>();
-        
-        for (UUID playerId : playerIds) {
-            PlayerJobData cachedData = cache.get(playerId);
-            if (cachedData != null) {
-                result.put(playerId, cachedData);
-                cacheHits++;
-            } else {
-                toLoad.add(playerId);
-                cacheMisses++;
-            }
-        }
-        
-        if (toLoad.isEmpty()) {
-            return CompletableFuture.completedFuture(result);
-        }
-        
-        return playerDataDao.loadPlayerDataBatch(toLoad).thenApply(loadedData -> {
-            cache.putAll(loadedData);
-            result.putAll(loadedData);
-            return result;
+        // Cache handled by UnifiedCacheManager, load directly from DB
+        return playerDataDao.loadPlayerDataBatch(playerIds).thenApply(loadedData -> {
+            // Cache update handled by UnifiedCacheManager via its async loader
+            return loadedData;
         });
     }
 
@@ -176,26 +152,24 @@ public class DatabaseDataStorage implements DataStorage {
 
     @Override
     public void evictFromCache(UUID playerId) {
-        cache.remove(playerId);
+        // Delegate to UnifiedCacheManager
+        plugin.getUnifiedCache().invalidatePlayer(playerId);
         rewardCache.remove(playerId);
     }
 
     @Override
     public void clearCache() {
-        cache.clear();
+        // Delegate to UnifiedCacheManager
+        plugin.getUnifiedCache().invalidateAll();
         rewardCache.clear();
-        cacheHits = 0;
-        cacheMisses = 0;
     }
 
     @Override
     public Map<String, Object> getCacheStats() {
+        // Delegate to UnifiedCacheManager for cache stats
         Map<String, Object> stats = new HashMap<>();
-        stats.put("cached_players", cache.size());
+        stats.putAll(plugin.getUnifiedCache().getStats());
         stats.put("cached_rewards", rewardCache.size());
-        stats.put("cache_hits", cacheHits);
-        stats.put("cache_misses", cacheMisses);
-        stats.put("hit_ratio", totalOperations > 0 ? (double) cacheHits / totalOperations : 0.0);
         return stats;
     }
 
@@ -203,8 +177,6 @@ public class DatabaseDataStorage implements DataStorage {
     public Map<String, Object> getPerformanceMetrics() {
         Map<String, Object> metrics = new HashMap<>();
         metrics.put("total_operations", totalOperations);
-        metrics.put("cache_hits", cacheHits);
-        metrics.put("cache_misses", cacheMisses);
         metrics.put("pool_active", connectionPool.getDataSource() != null ? 
                 connectionPool.getDataSource().getHikariPoolMXBean().getActiveConnections() : 0);
         metrics.put("pool_idle", connectionPool.getDataSource() != null ? 
@@ -215,8 +187,7 @@ public class DatabaseDataStorage implements DataStorage {
     @Override
     public void resetPerformanceMetrics() {
         totalOperations = 0;
-        cacheHits = 0;
-        cacheMisses = 0;
+        plugin.getUnifiedCache().resetStats();
     }
 
     @Override
@@ -231,7 +202,8 @@ public class DatabaseDataStorage implements DataStorage {
         health.put("shutdown", shutdown.get());
         health.put("pool_initialized", connectionPool.isInitialized());
         health.put("database_type", config.getType().getName());
-        health.put("cache_size", cache.size());
+        // Cache size from UnifiedCacheManager
+        health.putAll(plugin.getUnifiedCache().getStats());
         return health;
     }
 
@@ -382,29 +354,27 @@ public class DatabaseDataStorage implements DataStorage {
 
     @Override
     public PlayerJobData getPlayerData(UUID playerId) {
-        PlayerJobData cached = cache.get(playerId);
+        // Delegate to UnifiedCacheManager for cache lookup
+        PlayerJobData cached = plugin.getUnifiedCache().getPlayerDataSync(playerId);
         if (cached != null) {
-            cacheHits++;
             return cached;
         }
 
-        cacheMisses++;
+        // Fallback to async load
         try {
             PlayerJobData data = loadPlayerDataAsync(playerId).get();
-            cache.put(playerId, data);
             return data;
         } catch (Exception e) {
             plugin.getLogger().log(Level.WARNING, "Failed to load player data for " + playerId, e);
-            PlayerJobData newData = new PlayerJobData(playerId);
-            cache.put(playerId, newData);
-            return newData;
+            return new PlayerJobData(playerId);
         }
     }
 
     @Override
     public CompletableFuture<Void> deletePlayerData(UUID playerId) {
         return CompletableFuture.runAsync(() -> {
-            cache.remove(playerId);
+            // Invalidate from UnifiedCacheManager
+            plugin.getUnifiedCache().invalidatePlayer(playerId);
             rewardCache.remove(playerId);
 
             try {

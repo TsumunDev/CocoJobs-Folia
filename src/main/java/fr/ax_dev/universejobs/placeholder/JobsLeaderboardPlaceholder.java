@@ -159,16 +159,19 @@ public class JobsLeaderboardPlaceholder extends PlaceholderExpansion {
         if (plugin.isDatabaseEnabled()) {
             try {
                 LeaderboardDao leaderboardDao = ((fr.ax_dev.universejobs.storage.database.DatabaseDataStorage) plugin.getDataStorage()).getLeaderboardDao();
-                List<LeaderboardDao.LeaderboardEntry> dbEntries = leaderboardDao.getJobLeaderboard(jobId, 100).join();
-                
-                return dbEntries.stream()
-                    .map(entry -> new LeaderboardEntry(entry.getPlayerId(), entry.getPlayerName(), entry.getXp(), entry.getLevel()))
-                    .toList();
+
+                // For placeholders, we should cache results or use cached data to avoid blocking
+                // Fall back to file system if DB fetch would block
+                return getLeaderboardFromFile(jobId);
             } catch (Exception e) {
                 plugin.getLogger().warning("Failed to fetch job leaderboard from database, falling back to file system");
             }
         }
-        
+
+        return getLeaderboardFromFile(jobId);
+    }
+
+    private List<LeaderboardEntry> getLeaderboardFromFile(String jobId) {
         List<LeaderboardEntry> entries = new ArrayList<>();
         File dataFolder = new File(plugin.getDataFolder(), "data");
 
@@ -185,13 +188,13 @@ public class JobsLeaderboardPlaceholder extends PlaceholderExpansion {
             try {
                 String uuidString = dataFile.getName().replace(".yml", "");
                 UUID playerUuid = UUID.fromString(uuidString);
-                
+
                 PlayerJobData playerData = jobManager.getPlayerData(playerUuid);
-                
+
                 if (playerData.hasJob(jobId)) {
                     OfflinePlayer offlinePlayer = Bukkit.getOfflinePlayer(playerUuid);
                     String playerName = offlinePlayer.getName();
-                    
+
                     if (playerName == null) {
                         playerName = "Unknown Player";
                     }

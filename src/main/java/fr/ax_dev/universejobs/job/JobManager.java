@@ -496,7 +496,7 @@ public class JobManager {
     
     /**
      * Load player data from file by UUID.
-     * 
+     *
      * @param playerUuid The player UUID
      */
     public void loadPlayerData(UUID playerUuid) {
@@ -504,7 +504,7 @@ public class JobManager {
             plugin.getLogger().warning("Attempted to load player data after JobManager shutdown: " + playerUuid);
             return;
         }
-        
+
         // Check if data is already loaded
         dataLock.readLock().lock();
         try {
@@ -514,16 +514,44 @@ public class JobManager {
         } finally {
             dataLock.readLock().unlock();
         }
-        
-        try {
-            PlayerJobData data;
-            
-            if (plugin.isDatabaseEnabled()) {
-                DataStorage dataStorage = plugin.getDataStorage();
-                data = dataStorage.loadPlayerDataAsync(playerUuid).join();
-            } else {
+
+        // For database, load asynchronously and handle in callback
+        if (plugin.isDatabaseEnabled()) {
+            DataStorage dataStorage = plugin.getDataStorage();
+            dataStorage.loadPlayerDataAsync(playerUuid)
+                .thenAccept(data -> {
+                    data.setJobManager(this);
+                    assignDefaultJobs(data);
+
+                    dataLock.writeLock().lock();
+                    try {
+                        playerData.put(playerUuid, data);
+                        trackPlayerData(data);
+                    } finally {
+                        dataLock.writeLock().unlock();
+                    }
+                })
+                .exceptionally(ex -> {
+                    plugin.getLogger().log(Level.SEVERE, "Failed to load player data for " + playerUuid, ex);
+                    PlayerJobData fallbackData = new PlayerJobData(playerUuid);
+                    fallbackData.setJobManager(this);
+                    assignDefaultJobs(fallbackData);
+
+                    dataLock.writeLock().lock();
+                    try {
+                        playerData.put(playerUuid, fallbackData);
+                        trackPlayerData(fallbackData);
+                    } finally {
+                        dataLock.writeLock().unlock();
+                    }
+                    return null;
+                });
+        } else {
+            // File-based loading remains synchronous
+            try {
+                PlayerJobData data;
                 File dataFile = new File(dataFolder, playerUuid.toString() + ".yml");
-                
+
                 if (!dataFile.exists()) {
                     data = new PlayerJobData(playerUuid);
                 } else {
@@ -531,30 +559,30 @@ public class JobManager {
                     data = new PlayerJobData(playerUuid);
                     data.load(config);
                 }
-            }
-            
-            data.setJobManager(this);
-            assignDefaultJobs(data);
-            
-            dataLock.writeLock().lock();
-            try {
-                playerData.put(playerUuid, data);
-                trackPlayerData(data);
-            } finally {
-                dataLock.writeLock().unlock();
-            }
-        } catch (Exception e) {
-            plugin.getLogger().log(Level.SEVERE, "Failed to load player data for " + playerUuid, e);
-            PlayerJobData fallbackData = new PlayerJobData(playerUuid);
-            fallbackData.setJobManager(this);
-            assignDefaultJobs(fallbackData);
-            
-            dataLock.writeLock().lock();
-            try {
-                playerData.put(playerUuid, fallbackData);
-                trackPlayerData(fallbackData);
-            } finally {
-                dataLock.writeLock().unlock();
+
+                data.setJobManager(this);
+                assignDefaultJobs(data);
+
+                dataLock.writeLock().lock();
+                try {
+                    playerData.put(playerUuid, data);
+                    trackPlayerData(data);
+                } finally {
+                    dataLock.writeLock().unlock();
+                }
+            } catch (Exception e) {
+                plugin.getLogger().log(Level.SEVERE, "Failed to load player data for " + playerUuid, e);
+                PlayerJobData fallbackData = new PlayerJobData(playerUuid);
+                fallbackData.setJobManager(this);
+                assignDefaultJobs(fallbackData);
+
+                dataLock.writeLock().lock();
+                try {
+                    playerData.put(playerUuid, fallbackData);
+                    trackPlayerData(fallbackData);
+                } finally {
+                    dataLock.writeLock().unlock();
+                }
             }
         }
     }
@@ -1067,6 +1095,33 @@ public class JobManager {
         if (data == null) {
             return;
         }
+
+        try {
+            if (plugin.isDatabaseEnabled()) {
+                DataStorage dataStorage = plugin.getDataStorage();
+                if (dataStorage != null) {
+                    // Fire-and-forget for database saves (async without blocking)
+                    dataStorage.savePlayerDataAsync(playerUuid, data)
+                        .exceptionally(ex -> {
+                            plugin.getLogger().log(Level.SEVERE, "Failed to save player data for " + playerUuid, ex);
+                            return null;
+                        });
+                    return;
+                }
+            }
+
+            // File-based save remains synchronous
+            if (!dataFolder.exists()) {
+                dataFolder.mkdirs();
+            }
+            File dataFile = new File(dataFolder, playerUuid.toString() + ".yml");
+            FileConfiguration config = new FileConfiguration();
+            data.save(config);
+            config.save(dataFile);
+        } catch (Exception e) {
+            plugin.getLogger().log(Level.SEVERE, "Failed to save player data for " + playerUuid, e);
+        }
+    }
 
         try {
             if (plugin.isDatabaseEnabled()) {

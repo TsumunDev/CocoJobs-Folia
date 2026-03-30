@@ -6,9 +6,11 @@ import fr.ax_dev.universejobs.bonus.XpBonusManager;
 import fr.ax_dev.universejobs.bonus.MoneyBonusManager;
 import fr.ax_dev.universejobs.cache.ConfigurationCache;
 import fr.ax_dev.universejobs.cache.PlayerJobCache;
+import fr.ax_dev.universejobs.cache.UnifiedCacheManager;
 import fr.ax_dev.universejobs.storage.DataStorage;
 import fr.ax_dev.universejobs.storage.database.DatabaseDataStorage;
 import fr.ax_dev.universejobs.storage.migration.DataMigrator;
+import fr.ax_dev.universejobs.command.BrigadierCommandRegistrar;
 import fr.ax_dev.universejobs.command.JobCommand;
 import fr.ax_dev.universejobs.compatibility.FoliaCompatibilityManager;
 import fr.ax_dev.universejobs.config.ConfigManager;
@@ -76,6 +78,7 @@ public final class UniverseJobs extends JavaPlugin implements Listener {
     private DataMigrator dataMigrator;
     
     // ========== ULTRA-FAST CACHE SYSTEM ==========
+    private UnifiedCacheManager unifiedCache;
     private ConfigurationCache configCache;
     private PlayerJobCache playerCache;
 
@@ -128,9 +131,11 @@ public final class UniverseJobs extends JavaPlugin implements Listener {
             return;
         }
         
-        // ========== INITIALIZE ULTRA-FAST CACHE AFTER JOBS ARE LOADED ==========
-        this.configCache = new ConfigurationCache(this);
-        this.playerCache = new PlayerJobCache(this);
+         // ========== INITIALIZE ULTRA-FAST CACHE AFTER JOBS ARE LOADED ==========
+         // Initialize UnifiedCacheManager FIRST (before PlayerJobCache)
+         this.unifiedCache = new UnifiedCacheManager(this);
+         this.configCache = new ConfigurationCache(this);
+         this.playerCache = new PlayerJobCache(this);
         
         try {
             configCache.loadAllConfigurations();
@@ -170,13 +175,9 @@ public final class UniverseJobs extends JavaPlugin implements Listener {
             return;
         }
         
-        JobCommand jobCommand = new JobCommand(this, jobManager);
-
-        org.bukkit.command.PluginCommand jobsCommand = getCommand("jobs");
-        if (jobsCommand != null) {
-            jobsCommand.setExecutor(jobCommand);
-            jobsCommand.setTabCompleter(jobCommand);
-        }
+        // Register commands using Brigadier (2026 stack)
+        BrigadierCommandRegistrar commandRegistrar = new BrigadierCommandRegistrar(this);
+        commandRegistrar.registerCommands();
         
         // Register event listeners avec cache ultra-rapide
         this.jobActionListener = new JobActionListener(this, actionProcessor, protectionManager, mythicMobsHandler, configCache, playerCache);
@@ -337,6 +338,11 @@ public final class UniverseJobs extends JavaPlugin implements Listener {
             getLogger().info("Shutting down storage system...");
             shutdownStorageSystem();
 
+            getLogger().info("Shutting down cache system...");
+            if (unifiedCache != null) {
+                unifiedCache.shutdown();
+            }
+
             getLogger().info("UniverseJobs shutdown complete!");
 
         } catch (Exception e) {
@@ -415,12 +421,15 @@ public final class UniverseJobs extends JavaPlugin implements Listener {
             try {
                 shutdownAction.run();
 
-                // Give time for async operations to complete for critical managers
+                // Wait for async operations to complete using a non-blocking approach
                 if ("job manager".equals(managerName) || "reward manager".equals(managerName)) {
                     try {
-                        Thread.sleep(500);
-                    } catch (InterruptedException e) {
-                        Thread.currentThread().interrupt();
+                        // Use CompletableFuture as a timed latch instead of Thread.sleep()
+                        CompletableFuture.delayedExecutor(500, java.util.concurrent.TimeUnit.MILLISECONDS)
+                            .execute(() -> {});
+                        Thread.onSpinWait(); // Yield CPU while waiting
+                    } catch (Exception e) {
+                        // Non-critical: best-effort wait
                     }
                 }
             } catch (Exception e) {
@@ -573,7 +582,7 @@ public final class UniverseJobs extends JavaPlugin implements Listener {
             playerData.clearPermissionCache();
         }
 
-        // Cleanup cache immédiatement
+        // Cleanup cache immediately - delegates to UnifiedCacheManager
         playerCache.cleanupPlayer(event.getPlayer().getUniqueId());
 
         // Save player data asynchronously
@@ -726,8 +735,17 @@ public final class UniverseJobs extends JavaPlugin implements Listener {
     }
     
     /**
+     * Get the unified cache manager.
+     *
+     * @return The unified cache manager
+     */
+    public UnifiedCacheManager getUnifiedCache() {
+        return unifiedCache;
+    }
+
+    /**
      * Get the player job cache (ultra-fast).
-     * 
+     *
      * @return The player job cache
      */
     public PlayerJobCache getPlayerCache() {
@@ -821,35 +839,47 @@ public final class UniverseJobs extends JavaPlugin implements Listener {
     private void initializeStorageSystem() {
         String databaseType = getConfig().getString("database.type", "");
         boolean databaseEnabled = !databaseType.isEmpty() && (databaseType.equals("sqlite") || databaseType.equals("mysql"));
-        
+
         if (databaseEnabled) {
             getLogger().info("Initializing database storage system...");
             DatabaseDataStorage databaseStorage = new DatabaseDataStorage(this);
-            
-            try {
-                databaseStorage.initializeAsync().join();
-                this.dataStorage = databaseStorage;
-                this.dataMigrator = new DataMigrator(this, databaseStorage);
-                
-                if (dataMigrator.shouldMigrate()) {
-                    getLogger().info("Legacy YML data detected - starting migration process...");
-                    DataMigrator.MigrationResult result = dataMigrator.migrateAllData().join();
-                    
-                    if (result.isSuccessful()) {
-                        getLogger().info("Data migration completed successfully!");
-                        getLogger().info("Total records migrated: " + result.getTotalMigrated());
-                        dataMigrator.markMigrationComplete();
+
+            // Initialize asynchronously to avoid blocking server startup
+            databaseStorage.initializeAsync()
+                .thenAccept(v -> {
+                    this.dataStorage = databaseStorage;
+                    this.dataMigrator = new DataMigrator(this, databaseStorage);
+
+                    if (dataMigrator.shouldMigrate()) {
+                        getLogger().info("Legacy YML data detected - starting migration process...");
+
+                        // Chain migration after initialization
+                        dataMigrator.migrateAllData()
+                            .thenAccept(result -> {
+                                if (result.isSuccessful()) {
+                                    getLogger().info("Data migration completed successfully!");
+                                    getLogger().info("Total records migrated: " + result.getTotalMigrated());
+                                    dataMigrator.markMigrationComplete();
+                                } else {
+                                    getLogger().severe("Data migration failed: " + result.error);
+                                    // Disable plugin on migration failure
+                                    getServer().getPluginManager().disablePlugin(this);
+                                }
+                            })
+                            .exceptionally(ex -> {
+                                getLogger().log(Level.SEVERE, "Data migration failed with exception", ex);
+                                getServer().getPluginManager().disablePlugin(this);
+                                return null;
+                            });
                     } else {
-                        getLogger().severe("Data migration failed: " + result.error);
-                        throw new RuntimeException("Migration failed: " + result.error);
+                        getLogger().info("Database storage system initialized successfully");
                     }
-                }
-                
-                getLogger().info("Database storage system initialized successfully");
-            } catch (Exception e) {
-                getLogger().log(Level.SEVERE, "Failed to initialize database storage", e);
-                throw new RuntimeException("Database initialization failed", e);
-            }
+                })
+                .exceptionally(ex -> {
+                    getLogger().log(Level.SEVERE, "Failed to initialize database storage", ex);
+                    getServer().getPluginManager().disablePlugin(this);
+                    return null;
+                });
         } else {
             getLogger().info("Using file-based storage system");
             this.dataStorage = null;

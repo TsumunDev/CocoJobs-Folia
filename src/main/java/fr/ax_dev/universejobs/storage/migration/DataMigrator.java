@@ -68,44 +68,50 @@ public class DataMigrator {
 
     private int migratePlayerData() {
         AtomicInteger migratedCount = new AtomicInteger(0);
-        
+
         if (!dataFolder.exists()) {
             return 0;
         }
-        
+
         File[] playerFiles = dataFolder.listFiles((dir, name) -> name.endsWith(".yml"));
         if (playerFiles == null || playerFiles.length == 0) {
             return 0;
         }
-        
+
         plugin.getLogger().info("Migrating " + playerFiles.length + " player data files...");
-        
+
         List<CompletableFuture<Void>> futures = new ArrayList<>();
-        
+
         for (File playerFile : playerFiles) {
             CompletableFuture<Void> future = CompletableFuture.runAsync(() -> {
                 try {
                     String fileName = playerFile.getName();
                     String uuidString = fileName.substring(0, fileName.length() - 4);
                     UUID playerId = UUID.fromString(uuidString);
-                    
+
                     FileConfiguration config = YamlConfiguration.loadConfiguration(playerFile);
                     PlayerJobData data = new PlayerJobData(playerId);
                     data.load(config);
-                    
-                    databaseStorage.savePlayerDataAsync(playerId, data).join();
-                    migratedCount.incrementAndGet();
-                    
+
+                    // Use fire-and-forget pattern instead of .join()
+                    databaseStorage.savePlayerDataAsync(playerId, data)
+                        .thenRun(() -> migratedCount.incrementAndGet())
+                        .exceptionally(ex -> {
+                            plugin.getLogger().log(Level.WARNING, "Failed to migrate player file: " + playerFile.getName(), ex);
+                            return null;
+                        });
+
                 } catch (Exception e) {
                     plugin.getLogger().log(Level.WARNING, "Failed to migrate player file: " + playerFile.getName(), e);
                 }
             });
-            
+
             futures.add(future);
         }
-        
+
+        // Wait for all migrations to complete
         CompletableFuture.allOf(futures.toArray(new CompletableFuture[0])).join();
-        
+
         return migratedCount.get();
     }
 

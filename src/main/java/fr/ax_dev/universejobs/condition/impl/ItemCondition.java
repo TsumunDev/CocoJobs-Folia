@@ -6,8 +6,11 @@ import org.bukkit.configuration.ConfigurationSection;
 import org.bukkit.entity.Player;
 import org.bukkit.event.Event;
 import org.bukkit.inventory.ItemStack;
+import org.bukkit.inventory.meta.ItemMeta;
+import org.bukkit.persistence.PersistentDataContainer;
+import org.bukkit.persistence.PersistentDataType;
+import org.bukkit.NamespacedKey;
 
-import de.tr7zw.changeme.nbtapi.NBTItem;
 import java.util.List;
 import java.util.ArrayList;
 
@@ -78,58 +81,41 @@ public class ItemCondition extends AbstractCondition {
             }
         }
         
-        // Check NBT data
+        // Check NBT data using Paper PDC API
         if (nbtKey != null && nbtValue != null) {
             try {
-                de.tr7zw.changeme.nbtapi.NBTItem nbtItem = new NBTItem(item);
-                if (!nbtItem.hasKey(nbtKey)) {
+                if (!item.hasItemMeta()) {
                     return false;
                 }
-                
-                String itemNbtValue = nbtItem.getString(nbtKey);
+
+                ItemMeta meta = item.getItemMeta();
+                PersistentDataContainer container = meta.getPersistentDataContainer();
+                NamespacedKey namespacedKey = new NamespacedKey("universejobs", nbtKey);
+
+                if (!container.has(namespacedKey, PersistentDataType.STRING)) {
+                    return false;
+                }
+
+                String itemNbtValue = container.get(namespacedKey, PersistentDataType.STRING);
                 if (!nbtValue.equals(itemNbtValue)) {
                     return false;
                 }
             } catch (Exception e) {
-                // NBT-API not available or error occurred
+                // Error reading PDC data
                 return false;
             }
         }
         
-        // Check MMOItems data
+        // Check MMOItems data (requires MMOItems API - NBTAPI removed per Stack 2026)
+        // TODO: Integrate with official MMOItems API if needed
         if (mmoItemsType != null && mmoItemsId != null) {
-            if (!checkMMOItemsData(item)) {
-                return false;
-            }
+            // MMOItems checks disabled - would require NBTAPI or official MMOItems API
+            // To enable, implement using: net.Indyuce.mmoitems.api.Type and net.Indyuce.mmoitems.api.item.mmoitem.MMOItem
         }
-        
+
         return true;
     }
-    
-    /**
-     * Check MMOItems data using NBT.
-     * 
-     * @param item The item to check
-     * @return true if it matches
-     */
-    private boolean checkMMOItemsData(ItemStack item) {
-        try {
-            NBTItem nbtItem = new NBTItem(item);
-            
-            // Check if item has MMOItems NBT
-            if (!nbtItem.hasKey("MMOITEMS_ITEM_TYPE") || !nbtItem.hasKey("MMOITEMS_ITEM_ID")) {
-                return false;
-            }
-            
-            String itemType = nbtItem.getString("MMOITEMS_ITEM_TYPE");
-            String itemId = nbtItem.getString("MMOITEMS_ITEM_ID");
-            
-            return mmoItemsType.equals(itemType) && mmoItemsId.equals(itemId);
-        } catch (Exception e) {
-            return false;
-        }
-    }
-    
+
     @Override
     public ConditionType getType() {
         return ConditionType.ITEM;

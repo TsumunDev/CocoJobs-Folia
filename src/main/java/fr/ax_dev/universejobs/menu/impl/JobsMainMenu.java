@@ -16,6 +16,10 @@ import org.bukkit.Material;
 import org.bukkit.event.inventory.ClickType;
 import org.bukkit.event.inventory.InventoryClickEvent;
 import org.bukkit.inventory.ItemStack;
+import org.bukkit.inventory.meta.ItemMeta;
+import org.bukkit.persistence.PersistentDataContainer;
+import org.bukkit.persistence.PersistentDataType;
+import org.bukkit.NamespacedKey;
 import java.util.*;
 import java.util.stream.Collectors;
 
@@ -372,21 +376,35 @@ public class JobsMainMenu extends BaseMenu {
     }
     
     /**
-     * Add job NBT data to item.
+     * Add job NBT data to item using Paper PDC API.
      */
     private ItemStack addJobNBT(ItemStack item, String jobId) {
         if (item == null || jobId == null) return item;
 
-        return fr.ax_dev.universejobs.utils.NBTItemUtils.setStringNBT(item, "universe_job_id", jobId);
+        ItemMeta meta = item.getItemMeta();
+        if (meta == null) return item;
+
+        PersistentDataContainer container = meta.getPersistentDataContainer();
+        NamespacedKey namespacedKey = new NamespacedKey("universejobs", "job_id");
+        container.set(namespacedKey, PersistentDataType.STRING, jobId);
+
+        item.setItemMeta(meta);
+        return item;
     }
 
     /**
-     * Get job ID from item NBT.
+     * Get job ID from item NBT using Paper PDC API.
      */
     private String getJobIdFromNBT(ItemStack item) {
         if (item == null) return null;
 
-        return fr.ax_dev.universejobs.utils.NBTItemUtils.getStringNBT(item, "universe_job_id");
+        if (!item.hasItemMeta()) return null;
+
+        ItemMeta meta = item.getItemMeta();
+        PersistentDataContainer container = meta.getPersistentDataContainer();
+        NamespacedKey namespacedKey = new NamespacedKey("universejobs", "job_id");
+
+        return container.get(namespacedKey, PersistentDataType.STRING);
     }
 
     /**

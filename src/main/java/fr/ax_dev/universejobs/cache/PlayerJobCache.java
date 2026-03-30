@@ -12,26 +12,17 @@ import java.util.concurrent.atomic.AtomicLong;
 /**
  * Cache ultra-rapide des données joueur.
  * Lookup instantané sans attente de base de données.
+ * 
+ * REFACTORED: Now delegates to UnifiedCacheManager for all player data.
+ * ConfigurationCache remains for configuration-only data (no player data mixing).
  */
 public class PlayerJobCache {
     
     private final UniverseJobs plugin;
+    private final UnifiedCacheManager unifiedCache;
     
-    // Cache principal des jobs par joueur
-    private final Map<UUID, Set<String>> playerJobsCache = new ConcurrentHashMap<>();
-    
-    // Cache des niveaux par joueur/job (évite les calculs XP)
-    private final Map<UUID, Map<String, Integer>> playerLevelsCache = new ConcurrentHashMap<>();
-    
-    // Cache des XP par joueur/job  
-    private final Map<UUID, Map<String, Double>> playerXpCache = new ConcurrentHashMap<>();
-    
-    // Cache des permissions par joueur
+    // Cache des permissions par joueur (configuration-only, not player data)
     private final Map<UUID, Map<String, Boolean>> playerPermissionsCache = new ConcurrentHashMap<>();
-    
-    // Cache des multipliers par joueur
-    private final Map<UUID, Double> playerMultipliersCache = new ConcurrentHashMap<>();
-    
     
     // Statistiques de performance
     private final AtomicLong cacheHits = new AtomicLong(0);
@@ -39,10 +30,12 @@ public class PlayerJobCache {
     
     public PlayerJobCache(UniverseJobs plugin) {
         this.plugin = plugin;
+        this.unifiedCache = plugin.getUnifiedCache();
     }
     
     /**
      * Précharge les données des joueurs connectés.
+     * Now delegates to UnifiedCacheManager.
      */
     public void preloadOnlinePlayers() {
         for (Player player : plugin.getServer().getOnlinePlayers()) {
@@ -52,80 +45,39 @@ public class PlayerJobCache {
     
     /**
      * Précharge les données d'un joueur de manière asynchrone.
-     * Uses plugin's async scheduler for Folia compatibility.
+     * Now delegates to UnifiedCacheManager.
      */
     public CompletableFuture<Void> preloadPlayer(UUID playerUuid) {
-        CompletableFuture<Void> future = new CompletableFuture<>();
-
-        // Use async task for database operations
-        plugin.getServer().getAsyncScheduler().runNow(plugin, scheduledTask -> {
-            try {
-                PlayerJobData data = plugin.getJobManager().getPlayerData(playerUuid);
-
-                // Cache jobs - use concurrent set for thread safety
-                Set<String> jobs = ConcurrentHashMap.newKeySet();
-                jobs.addAll(data.getJobs());
-                playerJobsCache.put(playerUuid, jobs);
-
-                // Cache levels et XP
-                Map<String, Integer> levels = new ConcurrentHashMap<>();
-                Map<String, Double> xp = new ConcurrentHashMap<>();
-
-                for (String jobId : data.getJobs()) {
-                    levels.put(jobId, data.getLevel(jobId));
-                    xp.put(jobId, data.getXp(jobId));
-                }
-
-                playerLevelsCache.put(playerUuid, levels);
-                playerXpCache.put(playerUuid, xp);
-
-                future.complete(null);
-            } catch (Exception e) {
-                plugin.getLogger().warning("Failed to preload player data for " + playerUuid + ": " + e.getMessage());
-                future.completeExceptionally(e);
+        // Delegate to unified cache
+        return unifiedCache.getPlayerData(playerUuid).thenAccept(data -> {
+            // Data is now cached in UnifiedCacheManager
+            if (plugin.getConfigManager().isDebugEnabled()) {
+                plugin.getLogger().info("Player data preloaded for " + playerUuid);
             }
+        }).exceptionally(ex -> {
+            plugin.getLogger().warning("Failed to preload player data for " + playerUuid + ": " + ex.getMessage());
+            return null;
         });
-
-        return future;
     }
     
     /**
      * Lookup instantané des jobs d'un joueur (0ms).
+     * Now delegates to UnifiedCacheManager.
      */
     public Set<String> getPlayerJobs(UUID playerUuid) {
-        Set<String> jobs = playerJobsCache.get(playerUuid);
-        if (jobs != null) {
+        // Delegate to unified cache
+        Set<String> jobs = unifiedCache.getPlayerJobs(playerUuid);
+        if (!jobs.isEmpty()) {
             cacheHits.incrementAndGet();
-            return jobs;
+        } else {
+            cacheMisses.incrementAndGet();
         }
-
-        cacheMisses.incrementAndGet();
-
-        // Try to load synchronously from JobManager's cache first
-        try {
-            PlayerJobData data = plugin.getJobManager().getPlayerData(playerUuid);
-            if (data != null && !data.getJobs().isEmpty()) {
-                // Cache and return immediately
-                Set<String> loadedJobs = ConcurrentHashMap.newKeySet();
-                loadedJobs.addAll(data.getJobs());
-                playerJobsCache.put(playerUuid, loadedJobs);
-                return loadedJobs;
-            }
-        } catch (Exception e) {
-            // Sync load failed, trigger async preload
-            if (plugin.getConfigManager() != null && plugin.getConfigManager().isDebugEnabled()) {
-                plugin.getLogger().warning("Failed to sync-load player jobs for " + playerUuid + ", using async preload");
-            }
-        }
-
-        // Fallback async - ne bloque pas
-        preloadPlayer(playerUuid);
-        return Collections.emptySet();
+        return jobs;
     }
     
     
     /**
-     * Cache des permissions avec TTL.
+     * Cache des permissions avec TTL (configuration-only).
      */
     public boolean hasPermissionCached(UUID playerUuid, String permission) {
         Map<String, Boolean> perms = playerPermissionsCache.get(playerUuid);
@@ -149,150 +101,111 @@ public class PlayerJobCache {
     
     /**
      * Cache du multiplier d'un joueur.
+     * Now delegates to UnifiedCacheManager.
      */
     public double getPlayerMultiplier(UUID playerUuid) {
-        Double multiplier = playerMultipliersCache.get(playerUuid);
-        if (multiplier != null) {
-            cacheHits.incrementAndGet();
-            return multiplier;
-        }
-        
-        cacheMisses.incrementAndGet();
-        // Calcul et cache
-        Player player = plugin.getServer().getPlayer(playerUuid);
-        if (player != null) {
-            double result = calculateMultiplier(player);
-            playerMultipliersCache.put(playerUuid, result);
-            return result;
-        }
-        
-        return 1.0;
+        // Delegate to unified cache
+        double multiplier = unifiedCache.getMultiplier(playerUuid);
+        cacheHits.incrementAndGet();
+        return multiplier;
     }
     
     /**
      * Get niveau avec cache instantané.
+     * Now delegates to UnifiedCacheManager.
      */
     public int getPlayerLevel(UUID playerUuid, String jobId) {
-        Map<String, Integer> levels = playerLevelsCache.get(playerUuid);
-        if (levels != null && levels.containsKey(jobId)) {
+        // Delegate to unified cache
+        int level = unifiedCache.getPlayerLevel(playerUuid, jobId);
+        if (level > 0) {
             cacheHits.incrementAndGet();
-            return levels.get(jobId);
+        } else {
+            cacheMisses.incrementAndGet();
         }
-        
-        cacheMisses.incrementAndGet();
-        return 0; // Ou preload async
+        return level;
     }
     
     /**
      * Get XP avec cache instantané.
+     * Now delegates to UnifiedCacheManager.
      */
     public double getPlayerXp(UUID playerUuid, String jobId) {
-        Map<String, Double> xp = playerXpCache.get(playerUuid);
-        if (xp != null && xp.containsKey(jobId)) {
+        // Delegate to unified cache
+        double xp = unifiedCache.getPlayerXp(playerUuid, jobId);
+        if (xp > 0.0) {
             cacheHits.incrementAndGet();
-            return xp.get(jobId);
+        } else {
+            cacheMisses.incrementAndGet();
         }
-        
-        cacheMisses.incrementAndGet();
-        return 0.0; // Ou preload async
+        return xp;
     }
     
     /**
      * Mise à jour du cache après gain d'XP.
+     * Now delegates to UnifiedCacheManager.
      */
     public void updatePlayerXp(UUID playerUuid, String jobId, double newXp, int newLevel) {
-        // Update XP cache
-        playerXpCache.computeIfAbsent(playerUuid, k -> new ConcurrentHashMap<>())
-            .put(jobId, newXp);
-            
-        // Update level cache
-        playerLevelsCache.computeIfAbsent(playerUuid, k -> new ConcurrentHashMap<>())
-            .put(jobId, newLevel);
+        // Delegate to unified cache
+        unifiedCache.updatePlayerXp(playerUuid, jobId, newXp, newLevel);
     }
     
     /**
      * Ajout d'un job dans le cache.
+     * Now delegates to UnifiedCacheManager.
      */
     public void addPlayerJob(UUID playerUuid, String jobId) {
-        playerJobsCache.computeIfAbsent(playerUuid, k -> ConcurrentHashMap.newKeySet()).add(jobId);
-        // Reload player data to ensure cache is fresh
-        preloadPlayer(playerUuid);
+        // Delegate to unified cache
+        unifiedCache.addPlayerJob(playerUuid, jobId);
     }
     
     /**
      * Retrait d'un job du cache.
+     * Now delegates to UnifiedCacheManager.
      */
     public void removePlayerJob(UUID playerUuid, String jobId) {
-        Set<String> jobs = playerJobsCache.get(playerUuid);
-        if (jobs != null) {
-            jobs.remove(jobId);
-        }
-        
-        // Cleanup related caches
-        Map<String, Integer> levels = playerLevelsCache.get(playerUuid);
-        if (levels != null) levels.remove(jobId);
-        
-        Map<String, Double> xp = playerXpCache.get(playerUuid);
-        if (xp != null) xp.remove(jobId);
+        // Delegate to unified cache
+        unifiedCache.removePlayerJob(playerUuid, jobId);
     }
     
     /**
      * Nettoyage complet d'un joueur (déconnexion).
+     * Now delegates to UnifiedCacheManager.
      */
     public void cleanupPlayer(UUID playerUuid) {
-        playerJobsCache.remove(playerUuid);
-        playerLevelsCache.remove(playerUuid);
-        playerXpCache.remove(playerUuid);
-        playerPermissionsCache.remove(playerUuid);
-        playerMultipliersCache.remove(playerUuid);
+        // Delegate to unified cache
+        unifiedCache.invalidatePlayer(playerUuid);
         
+        // Also cleanup local permission cache
+        playerPermissionsCache.remove(playerUuid);
     }
     
     /**
      * Nettoyage des caches expirés.
+     * Now delegates to UnifiedCacheManager for player data.
      */
     public void performCleanup() {
+        // Cleanup local permission cache
         playerPermissionsCache.entrySet().removeIf(entry -> {
             Player player = plugin.getServer().getPlayer(entry.getKey());
             return player == null || !player.isOnline();
         });
         
-        // Nettoie les multipliers
-        playerMultipliersCache.entrySet().removeIf(entry -> {
-            Player player = plugin.getServer().getPlayer(entry.getKey());
-            return player == null || !player.isOnline();
-        });
-    }
-    
-    /**
-     * Calcul du multiplier pour un joueur.
-     */
-    private double calculateMultiplier(Player player) {
-        if (player.isOp() || player.hasPermission("*")) {
-            return 1.0; // Évite les bonus OP
-        }
-        
-        // Check multipliers 10 -> 1 for money and exp
-        for (int i = 10; i >= 1; i--) {
-            if (player.hasPermission("universejobs.multiplier.money." + i) ||
-                player.hasPermission("universejobs.multiplier.exp." + i)) {
-                return i;
-            }
-        }
-        
-        return 1.0;
+        // Delegate unified cache cleanup
+        unifiedCache.performCleanup();
     }
     
     /**
      * Statistiques de performance du cache.
+     * Now includes UnifiedCacheManager stats.
      */
     public Map<String, Object> getStats() {
         Map<String, Object> stats = new HashMap<>();
         stats.put("cache_hits", cacheHits.get());
         stats.put("cache_misses", cacheMisses.get());
-        stats.put("cached_players", playerJobsCache.size());
-        stats.put("cached_levels", playerLevelsCache.size());
         stats.put("cached_permissions", playerPermissionsCache.size());
+        
+        // Include unified cache stats
+        stats.putAll(unifiedCache.getStats());
         
         long totalRequests = cacheHits.get() + cacheMisses.get();
         if (totalRequests > 0) {
@@ -305,9 +218,11 @@ public class PlayerJobCache {
     
     /**
      * Reset des statistiques.
+     * Now resets both local and unified cache stats.
      */
     public void resetStats() {
         cacheHits.set(0);
         cacheMisses.set(0);
+        unifiedCache.resetStats();
     }
 }

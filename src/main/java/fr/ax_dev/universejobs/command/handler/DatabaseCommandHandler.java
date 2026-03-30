@@ -63,40 +63,41 @@ public class DatabaseCommandHandler {
         }
 
         sender.sendMessage("§aStarting database migration from " + oldType + " to " + newType + "...");
-        
+
         plugin.getFoliaManager().runAsync(() -> {
-            try {
-                if (plugin.isDatabaseEnabled()) {
-                    DatabaseDataStorage storage = (DatabaseDataStorage) plugin.getDataStorage();
-                    DataMigrator migrator = new DataMigrator(plugin, storage);
-                    
-                    DataMigrator.MigrationResult result = migrator.migrateAllData().join();
-                    
-                    plugin.getFoliaManager().runNextTick(() -> {
-                        if (result.isSuccessful()) {
-                            sender.sendMessage("§aMigration completed successfully!");
-                            sender.sendMessage("§aPlayer data migrated: " + result.playerDataMigrated);
-                            sender.sendMessage("§aReward data migrated: " + result.rewardDataMigrated);
-                            sender.sendMessage("§aTotal records migrated: " + result.getTotalMigrated());
-                            migrator.markMigrationComplete();
-                        } else {
-                            sender.sendMessage("§cMigration failed: " + result.error);
-                        }
+            if (plugin.isDatabaseEnabled()) {
+                DatabaseDataStorage storage = (DatabaseDataStorage) plugin.getDataStorage();
+                DataMigrator migrator = new DataMigrator(plugin, storage);
+
+                // Use callback instead of .join() since we're already in async context
+                migrator.migrateAllData()
+                    .thenAccept(result -> {
+                        plugin.getFoliaManager().runNextTick(() -> {
+                            if (result.isSuccessful()) {
+                                sender.sendMessage("§aMigration completed successfully!");
+                                sender.sendMessage("§aPlayer data migrated: " + result.playerDataMigrated);
+                                sender.sendMessage("§aReward data migrated: " + result.rewardDataMigrated);
+                                sender.sendMessage("§aTotal records migrated: " + result.getTotalMigrated());
+                                migrator.markMigrationComplete();
+                            } else {
+                                sender.sendMessage("§cMigration failed: " + result.error);
+                            }
+                        });
+                    })
+                    .exceptionally(ex -> {
+                        plugin.getFoliaManager().runNextTick(() -> {
+                            sender.sendMessage("§cMigration failed: " + ex.getMessage());
+                        });
+                        plugin.getLogger().log(Level.SEVERE, "Migration failed with exception", ex);
+                        return null;
                     });
-                } else {
-                    plugin.getFoliaManager().runNextTick(() -> {
-                        sender.sendMessage("§cDatabase is not enabled in configuration");
-                    });
-                }
-                
-            } catch (Exception e) {
+            } else {
                 plugin.getFoliaManager().runNextTick(() -> {
-                    sender.sendMessage("§cMigration failed: " + e.getMessage());
+                    sender.sendMessage("§cDatabase is not enabled in configuration");
                 });
-                plugin.getLogger().log(Level.SEVERE, "Migration failed: " + e.getMessage(), e);
             }
         });
-        
+
         return true;
     }
 

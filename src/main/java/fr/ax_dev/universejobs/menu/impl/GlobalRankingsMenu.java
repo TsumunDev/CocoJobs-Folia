@@ -8,11 +8,14 @@ import fr.ax_dev.universejobs.menu.config.MenuItemConfig;
 import fr.ax_dev.universejobs.menu.config.SingleMenuConfig;
 import fr.ax_dev.universejobs.menu.config.SimpleConfigurationSection;
 import fr.ax_dev.universejobs.menu.utils.MenuItemUtils;
-import fr.ax_dev.universejobs.utils.NBTItemUtils;
 import org.bukkit.Bukkit;
 import org.bukkit.OfflinePlayer;
 import org.bukkit.event.inventory.InventoryClickEvent;
 import org.bukkit.inventory.ItemStack;
+import org.bukkit.inventory.meta.ItemMeta;
+import org.bukkit.persistence.PersistentDataContainer;
+import org.bukkit.persistence.PersistentDataType;
+import org.bukkit.NamespacedKey;
 
 import java.util.*;
 import java.util.stream.Collectors;
@@ -274,7 +277,13 @@ public class GlobalRankingsMenu extends BaseMenu {
         ItemStack item = createMenuItem(itemConfig, placeholders);
 
         if (item != null) {
-            item = NBTItemUtils.setStringNBT(item, "universe_job_id", job.getId());
+            ItemMeta meta = item.getItemMeta();
+            if (meta != null) {
+                PersistentDataContainer container = meta.getPersistentDataContainer();
+                NamespacedKey namespacedKey = new NamespacedKey("universejobs", "job_id");
+                container.set(namespacedKey, PersistentDataType.STRING, job.getId());
+                item.setItemMeta(meta);
+            }
         }
 
         return item;
@@ -305,7 +314,13 @@ public class GlobalRankingsMenu extends BaseMenu {
         ItemStack item = createMenuItem(itemConfig, new HashMap<>());
 
         if (item != null) {
-            item = NBTItemUtils.setStringNBT(item, "universe_job_id", job.getId());
+            ItemMeta meta = item.getItemMeta();
+            if (meta != null) {
+                PersistentDataContainer container = meta.getPersistentDataContainer();
+                NamespacedKey namespacedKey = new NamespacedKey("universejobs", "job_id");
+                container.set(namespacedKey, PersistentDataType.STRING, job.getId());
+                item.setItemMeta(meta);
+            }
         }
 
         return item;
@@ -541,10 +556,17 @@ public class GlobalRankingsMenu extends BaseMenu {
             return;
         }
         
-        // Handle job selection buttons using NBT detection
+        // Handle job selection buttons using PDC detection
         ItemStack clickedItem = inventory.getItem(slot);
         if (clickedItem != null) {
-            String jobId = NBTItemUtils.getStringNBT(clickedItem, "universe_job_id");
+            String jobId = null;
+            if (clickedItem.hasItemMeta()) {
+                ItemMeta meta = clickedItem.getItemMeta();
+                PersistentDataContainer container = meta.getPersistentDataContainer();
+                NamespacedKey namespacedKey = new NamespacedKey("universejobs", "job_id");
+                jobId = container.get(namespacedKey, PersistentDataType.STRING);
+            }
+
             if (jobId != null && !jobId.equals(selectedJob)) {
                 selectedJob = jobId;
                 currentPage = 0;

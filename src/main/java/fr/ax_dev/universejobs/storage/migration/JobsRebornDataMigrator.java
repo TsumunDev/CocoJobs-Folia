@@ -116,8 +116,13 @@ public class JobsRebornDataMigrator {
                     CompletableFuture<Void> future = CompletableFuture.runAsync(() -> {
                         try {
                             PlayerJobData playerData = convertDatabasePlayerData(rs, playerId);
-                            databaseStorage.savePlayerDataAsync(playerId, playerData).join();
-                            migratedCount.incrementAndGet();
+                            // Use fire-and-forget pattern instead of .join()
+                            databaseStorage.savePlayerDataAsync(playerId, playerData)
+                                .thenRun(() -> migratedCount.incrementAndGet())
+                                .exceptionally(ex -> {
+                                    plugin.getLogger().log(Level.WARNING, "Failed to migrate player data for: " + playerId, ex);
+                                    return null;
+                                });
                         } catch (Exception e) {
                             plugin.getLogger().log(Level.WARNING, "Failed to migrate player data for: " + playerId, e);
                         }
@@ -126,6 +131,7 @@ public class JobsRebornDataMigrator {
                     futures.add(future);
                 }
 
+                // Wait for all migrations to complete
                 CompletableFuture.allOf(futures.toArray(new CompletableFuture[0])).join();
 
             } finally {
@@ -168,8 +174,13 @@ public class JobsRebornDataMigrator {
                     FileConfiguration config = YamlConfiguration.loadConfiguration(playerFile);
                     PlayerJobData playerData = convertFilePlayerData(config, playerId);
 
-                    databaseStorage.savePlayerDataAsync(playerId, playerData).join();
-                    migratedCount.incrementAndGet();
+                    // Use fire-and-forget pattern instead of .join()
+                    databaseStorage.savePlayerDataAsync(playerId, playerData)
+                        .thenRun(() -> migratedCount.incrementAndGet())
+                        .exceptionally(ex -> {
+                            plugin.getLogger().log(Level.WARNING, "Failed to migrate player file: " + playerFile.getName(), ex);
+                            return null;
+                        });
 
                 } catch (Exception e) {
                     plugin.getLogger().log(Level.WARNING, "Failed to migrate player file: " + playerFile.getName(), e);
@@ -179,6 +190,7 @@ public class JobsRebornDataMigrator {
             futures.add(future);
         }
 
+        // Wait for all migrations to complete
         CompletableFuture.allOf(futures.toArray(new CompletableFuture[0])).join();
 
         return migratedCount.get();
