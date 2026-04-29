@@ -42,7 +42,8 @@ public class AsyncMenuLoader {
             Map<String, Integer> permissions = new ConcurrentHashMap<>();
 
             // Pre-fetch all job max levels
-            for (Job job : plugin.getJobManager().getJobs().values()) {
+            var jobs = List.copyOf(plugin.getJobManager().getJobs().values());
+            for (Job job : jobs) {
                 PlayerJobData playerData = plugin.getJobManager().getPlayerData(playerId);
                 int maxLevel = playerData.getMaxLevel(job.getId());
                 permissions.put(job.getId(), maxLevel);

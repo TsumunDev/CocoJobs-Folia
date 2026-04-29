@@ -1,6 +1,7 @@
 package fr.ax_dev.universejobs.protection;
 
 import fr.ax_dev.universejobs.UniverseJobs;
+import fr.ax_dev.universejobs.compatibility.FoliaCompatibilityManager;
 import org.bukkit.Material;
 import org.bukkit.NamespacedKey;
 import org.bukkit.block.Block;
@@ -24,17 +25,20 @@ public class BlockProtectionManager {
     private static final String BLOCK_PREFIX = "block_";
     
     private final UniverseJobs plugin;
+    private final FoliaCompatibilityManager foliaManager;
     private boolean enabled;
     private boolean nexoEnabled;
     private List<String> blacklist;
-    
+
     /**
      * Create a new block protection manager.
-     * 
+     *
      * @param plugin The plugin instance
+     * @param foliaManager The Folia compatibility manager
      */
-    public BlockProtectionManager(UniverseJobs plugin) {
+    public BlockProtectionManager(UniverseJobs plugin, FoliaCompatibilityManager foliaManager) {
         this.plugin = plugin;
+        this.foliaManager = foliaManager;
         new NamespacedKey(plugin, "player_placed");
         
         loadConfiguration();
@@ -92,7 +96,12 @@ public class BlockProtectionManager {
             }
             return;
         }
-        
+
+        if (!foliaManager.isOwnedByCurrentRegion(block.getLocation())) {
+            foliaManager.runAtLocation(block.getLocation(), () -> recordBlockPlacement(player, block));
+            return;
+        }
+
         try {
             // Add NBT tag to mark this block as player-placed
             NamespacedKey blockKey = new NamespacedKey(plugin, BLOCK_PREFIX + block.getX() + "_" + block.getY() + "_" + block.getZ());

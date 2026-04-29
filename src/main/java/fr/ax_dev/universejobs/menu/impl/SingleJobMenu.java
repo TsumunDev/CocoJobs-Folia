@@ -15,6 +15,7 @@ import org.bukkit.inventory.ItemStack;
 
 import java.util.*;
 import java.util.UUID;
+import java.util.concurrent.ConcurrentHashMap;
 
 /**
  * Menu for an individual job showing job information and action buttons.
@@ -27,6 +28,7 @@ public class SingleJobMenu extends BaseMenu {
     private final PlayerJobData playerData;
     private final Map<String, String> cachedPlaceholders;
     private final LanguageManager languageManager;
+    private final Map<UUID, org.bukkit.OfflinePlayer> playerCache = new ConcurrentHashMap<>();
     private boolean hasJob;
     
     public SingleJobMenu(UniverseJobs plugin, org.bukkit.entity.Player player, String jobId, SingleMenuConfig config) {
@@ -598,7 +600,7 @@ public class SingleJobMenu extends BaseMenu {
         List<RankingEntry> entries = new ArrayList<>();
 
         // Get all player data using centralized JobManager approach
-        Map<UUID, PlayerJobData> allPlayerData = plugin.getJobManager().getAllPlayerData();
+        Map<UUID, PlayerJobData> allPlayerData = new HashMap<>(plugin.getJobManager().getAllPlayerData());
 
         for (Map.Entry<UUID, PlayerJobData> entry : allPlayerData.entrySet()) {
             UUID playerId = entry.getKey();
@@ -609,7 +611,7 @@ public class SingleJobMenu extends BaseMenu {
 
             // Only include players with stats for this job
             if (level > 0 || xp > 0) {
-                org.bukkit.OfflinePlayer offlinePlayer = org.bukkit.Bukkit.getOfflinePlayer(playerId);
+                org.bukkit.OfflinePlayer offlinePlayer = playerCache.computeIfAbsent(playerId, org.bukkit.Bukkit::getOfflinePlayer);
                 String playerName = offlinePlayer.getName();
 
                 if (playerName != null) {
