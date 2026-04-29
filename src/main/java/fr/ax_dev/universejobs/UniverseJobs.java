@@ -344,6 +344,9 @@ public final class UniverseJobs extends JavaPlugin implements Listener {
                 unifiedCache.shutdown();
             }
 
+            // Null configManager last since cache shutdown may need it
+            configManager = null;
+
             getLogger().info("UniverseJobs shutdown complete!");
 
         } catch (Exception e) {
@@ -386,7 +389,6 @@ public final class UniverseJobs extends JavaPlugin implements Listener {
         protectionManager = null;
         actionProcessor = null;
         languageManager = null;
-        configManager = null;
     }
 
     /**

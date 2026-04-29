@@ -62,7 +62,7 @@ public class UnifiedCacheManager {
             .maximumSize(MAX_CACHE_SIZE)
             .expireAfterWrite(PLAYER_DATA_TTL_MINUTES, TimeUnit.MINUTES)
             .removalListener((key, value, cause) -> {
-                if (plugin.getConfigManager().isDebugEnabled()) {
+                if (plugin.getConfigManager() != null && plugin.getConfigManager().isDebugEnabled()) {
                     plugin.getLogger().info("Player data removed from cache: " + key + " (cause: " + cause + ")");
                 }
             })
@@ -73,7 +73,7 @@ public class UnifiedCacheManager {
         this.multiplierCache = Caffeine.newBuilder()
             .expireAfterWrite(MULTIPLIER_TTL_SECONDS, TimeUnit.SECONDS)
             .removalListener((key, value, cause) -> {
-                if (plugin.getConfigManager().isDebugEnabled()) {
+                if (plugin.getConfigManager() != null && plugin.getConfigManager().isDebugEnabled()) {
                     plugin.getLogger().info("Multiplier removed from cache: " + key);
                 }
             })
@@ -148,7 +148,7 @@ public class UnifiedCacheManager {
         cacheHits.set(0);
         cacheMisses.set(0);
         
-        if (plugin.getConfigManager().isDebugEnabled()) {
+        if (plugin.getConfigManager() != null && plugin.getConfigManager().isDebugEnabled()) {
             plugin.getLogger().info("All cache entries invalidated");
         }
     }
@@ -281,7 +281,7 @@ public class UnifiedCacheManager {
         playerDataCache.synchronous().cleanUp();
         multiplierCache.cleanUp();
         
-        if (plugin.getConfigManager().isDebugEnabled()) {
+        if (plugin.getConfigManager() != null && plugin.getConfigManager().isDebugEnabled()) {
             plugin.getLogger().info("Cache cleanup completed");
         }
     }
@@ -318,7 +318,7 @@ public class UnifiedCacheManager {
      * Shutdown cache manager gracefully.
      */
     public void shutdown() {
-        if (plugin.getConfigManager().isDebugEnabled()) {
+        if (plugin.getConfigManager() != null && plugin.getConfigManager().isDebugEnabled()) {
             plugin.getLogger().info("Shutting down UnifiedCacheManager...");
         }
         

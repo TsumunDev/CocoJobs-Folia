@@ -55,6 +55,10 @@ public class RewardManager {
      * Initialize the reward system.
      */
     public void initialize() {
+        if (this.storage == null) {
+            plugin.getLogger().severe("[RewardManager] Storage is null — cannot initialize. Check database configuration.");
+            throw new IllegalStateException("RewardStorage was not initialized before RewardManager.initialize()");
+        }
         storage.initialize();
         loadRewards();
         guiConfigLoader.loadGuiConfigs();
@@ -66,10 +70,12 @@ public class RewardManager {
      * Shutdown the reward system.
      */
     public void shutdown() {
-        storage.shutdown();
+        if (storage != null) {
+            storage.shutdown();
+        }
         jobRewards.clear();
         allRewards.clear();
-        
+
         plugin.getLogger().info("Reward system shutdown complete");
     }
     

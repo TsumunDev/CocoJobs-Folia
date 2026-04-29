@@ -411,11 +411,14 @@ public class BatchedRewardManager {
      */
     private Economy getVaultEconomy() {
         try {
+            if (!plugin.getServer().getPluginManager().isPluginEnabled("Vault")) {
+                return null;
+            }
             if (plugin.getServer().getServicesManager().getRegistration(Economy.class) != null) {
                 return plugin.getServer().getServicesManager().getRegistration(Economy.class).getProvider();
             }
-        } catch (Exception e) {
-            // Class not found or other error
+        } catch (Throwable e) {
+            // NoClassDefFoundError if Vault is not present
         }
         return null;
     }
