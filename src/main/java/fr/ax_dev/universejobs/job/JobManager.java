@@ -592,7 +592,7 @@ public class JobManager {
      * 
      * @param data The player job data
      */
-    private void assignDefaultJobs(PlayerJobData data) {
+    public void assignDefaultJobs(PlayerJobData data) {
         ConfigManager config = plugin.getConfigManager();
         
         if (config.isAllJobsByDefault()) {
@@ -1115,7 +1115,7 @@ public class JobManager {
                 dataFolder.mkdirs();
             }
             File dataFile = new File(dataFolder, playerUuid.toString() + ".yml");
-            FileConfiguration config = new FileConfiguration();
+            FileConfiguration config = new YamlConfiguration();
             data.save(config);
             config.save(dataFile);
         } catch (Exception e) {
@@ -1123,26 +1123,6 @@ public class JobManager {
         }
     }
 
-        try {
-            if (plugin.isDatabaseEnabled()) {
-                DataStorage dataStorage = plugin.getDataStorage();
-                if (dataStorage != null) {
-                    dataStorage.savePlayerDataAsync(playerUuid, data).join();
-                }
-            } else {
-                if (!dataFolder.exists()) {
-                    dataFolder.mkdirs();
-                }
-                File dataFile = new File(dataFolder, playerUuid.toString() + ".yml");
-                FileConfiguration config = new YamlConfiguration();
-                data.save(config);
-                config.save(dataFile);
-            }
-        } catch (Exception e) {
-            plugin.getLogger().log(Level.SEVERE, "Failed to save player data for " + playerUuid, e);
-        }
-    }
-    
     /**
      * Check if automatic cleanup is needed and perform it.
      */

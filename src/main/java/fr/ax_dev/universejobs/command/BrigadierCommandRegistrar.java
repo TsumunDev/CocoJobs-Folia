@@ -11,8 +11,9 @@ import fr.ax_dev.universejobs.job.JobManager;
 import io.papermc.paper.command.brigadier.CommandSourceStack;
 import io.papermc.paper.command.brigadier.Commands;
 import io.papermc.paper.command.brigadier.argument.ArgumentTypes;
+import com.mojang.brigadier.tree.LiteralCommandNode;
 import io.papermc.paper.command.brigadier.argument.resolvers.selector.PlayerSelectorArgumentResolver;
-import io.papermc.paper.plugin.lifecycle.event.LifecycleEvents;
+import io.papermc.paper.plugin.lifecycle.event.types.LifecycleEvents;
 import org.bukkit.Bukkit;
 import org.bukkit.command.CommandSender;
 import org.bukkit.entity.Player;
@@ -96,8 +97,7 @@ public class BrigadierCommandRegistrar {
     /**
      * Build the main /jobs command with all subcommands.
      */
-    @SuppressWarnings("unchecked")
-    private Object buildJobsCommand() {
+    private LiteralCommandNode<CommandSourceStack> buildJobsCommand() {
         var jobsLiteral = Commands.literal("jobs")
                 .requires(source -> source.getSender().hasPermission("universejobs.use"))
                 .executes(ctx -> handleDefaultJobsCommand(ctx));
@@ -129,8 +129,7 @@ public class BrigadierCommandRegistrar {
 
     // ==================== Subcommand Literal Builders ====================
 
-    @SuppressWarnings("unchecked")
-    private Object buildJoinCommandLiteral() {
+    private LiteralCommandNode<CommandSourceStack> buildJoinCommandLiteral() {
         return Commands.literal(CMD_JOIN)
                 .requires(source -> source.getSender() instanceof Player)
                 .then(Commands.argument("job", StringArgumentType.word())
@@ -152,11 +151,10 @@ public class BrigadierCommandRegistrar {
                             String job = ctx.getArgument("job", String.class);
                             String[] args = {CMD_JOIN, job};
                             return joinLeaveHandler.handleCommand(sender, args) ? 1 : 0;
-                        }));
+                        })).build();
     }
 
-    @SuppressWarnings("unchecked")
-    private Object buildLeaveCommandLiteral() {
+    private LiteralCommandNode<CommandSourceStack> buildLeaveCommandLiteral() {
         return Commands.literal(CMD_LEAVE)
                 .requires(source -> source.getSender() instanceof Player)
                 .then(Commands.argument("job", StringArgumentType.word())
@@ -178,11 +176,10 @@ public class BrigadierCommandRegistrar {
                             String job = ctx.getArgument("job", String.class);
                             String[] args = {CMD_LEAVE, job};
                             return joinLeaveHandler.handleCommand(sender, args) ? 1 : 0;
-                        }));
+                        })).build();
     }
 
-    @SuppressWarnings("unchecked")
-    private Object buildInfoCommandLiteral() {
+    private LiteralCommandNode<CommandSourceStack> buildInfoCommandLiteral() {
         var infoLiteral = Commands.literal(CMD_INFO)
                 .requires(source -> source.getSender() instanceof Player)
                 .executes(ctx -> {
@@ -218,7 +215,7 @@ public class BrigadierCommandRegistrar {
         return infoLiteral.build();
     }
 
-    private Object buildListCommandLiteral() {
+    private LiteralCommandNode<CommandSourceStack> buildListCommandLiteral() {
         return Commands.literal(CMD_LIST)
                 .requires(source -> source.getSender() instanceof Player)
                 .executes(ctx -> {
@@ -226,12 +223,11 @@ public class BrigadierCommandRegistrar {
                     CommandSender sender = ctx.getSource().getSender();
                     String[] args = {CMD_LIST};
                     return infoStatsHandler.handleCommand(sender, args) ? 1 : 0;
-                }))
+                })
                 .build();
     }
 
-    @SuppressWarnings("unchecked")
-    private Object buildStatsCommandLiteral() {
+    private LiteralCommandNode<CommandSourceStack> buildStatsCommandLiteral() {
         var statsLiteral = Commands.literal(CMD_STATS)
                 .requires(source -> source.getSender() instanceof Player)
                 .executes(ctx -> {
@@ -266,8 +262,7 @@ public class BrigadierCommandRegistrar {
         return statsLiteral.build();
     }
 
-    @SuppressWarnings("unchecked")
-    private Object buildRewardsCommandLiteral() {
+    private LiteralCommandNode<CommandSourceStack> buildRewardsCommandLiteral() {
         var rewardsLiteral = Commands.literal(CMD_REWARDS)
                 .requires(source -> source.getSender() instanceof Player && source.getSender().hasPermission("universejobs.rewards.use"))
                 .executes(ctx -> {
@@ -341,8 +336,7 @@ public class BrigadierCommandRegistrar {
         return rewardsLiteral.build();
     }
 
-    @SuppressWarnings("unchecked")
-    private Object buildActionLimitCommandLiteral() {
+    private LiteralCommandNode<CommandSourceStack> buildActionLimitCommandLiteral() {
         var actionLimitLiteral = Commands.literal(CMD_ACTION_LIMIT)
                 .requires(source -> source.getSender().hasPermission("universejobs.admin.actionlimits"));
 
@@ -450,8 +444,7 @@ public class BrigadierCommandRegistrar {
         return actionLimitLiteral.build();
     }
 
-    @SuppressWarnings("unchecked")
-    private Object buildMenuCommandLiteral() {
+    private LiteralCommandNode<CommandSourceStack> buildMenuCommandLiteral() {
         var menuLiteral = Commands.literal(CMD_MENU)
                 .requires(source -> source.getSender() instanceof Player)
                 .executes(ctx -> {
@@ -528,8 +521,7 @@ public class BrigadierCommandRegistrar {
         return menuLiteral.build();
     }
 
-    @SuppressWarnings("unchecked")
-    private Object buildAdminCommandLiteral() {
+    private LiteralCommandNode<CommandSourceStack> buildAdminCommandLiteral() {
         var adminLiteral = Commands.literal(CMD_ADMIN)
                 .requires(source -> source.getSender().hasPermission("universejobs.admin"));
 

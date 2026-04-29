@@ -1222,10 +1222,6 @@ public class AdminJobCommandHandler extends JobCommandHandler {
                 });
             }
         });
-                });
-                plugin.getLogger().log(Level.SEVERE, "Migration failed: " + e.getMessage(), e);
-            }
-        });
 
         return true;
     }

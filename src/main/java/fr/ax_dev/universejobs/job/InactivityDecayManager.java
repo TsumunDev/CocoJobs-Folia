@@ -79,10 +79,11 @@ public class InactivityDecayManager {
 
             processedCount++;
 
-                if (processedCount % 100 == 0) {
-                    // Yield CPU briefly to avoid tight async loops on high-volume processing
-                    Thread.yield();
-                }
+            if (processedCount % 100 == 0) {
+                // Yield CPU briefly to avoid tight async loops on high-volume processing
+                Thread.yield();
+            }
+        }
 
         if (decayedCount > 0 || removedCount > 0) {
             plugin.getLogger().info("Inactivity decay process completed: " +
